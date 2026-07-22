@@ -215,6 +215,11 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     fun setTranslationEnabled(enabled: Boolean) {
         prefsRepo.setTranslationEnabled(enabled)
+        if (enabled) {
+            triggerTranslation(forceManual = true)
+        } else {
+            _uiState.value = _uiState.value.copy(activeOverlays = emptyList())
+        }
     }
 
     fun setTranslationMode(mode: TranslationMode) {
