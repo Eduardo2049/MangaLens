@@ -1,0 +1,6 @@
+{
+  "name": "Manga Lens - Tradutor Visual",
+  "description": "Tradução visual em tempo real para Mangás, Manhwas e Manhuas com suporte a OCR vertical, webtoons e histórico flutuante.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
