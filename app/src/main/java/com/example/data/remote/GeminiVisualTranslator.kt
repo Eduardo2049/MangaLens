@@ -18,6 +18,30 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
+/**
+ * Visual translation client powered by the Gemini REST API.
+ *
+ * ⚠️  SECURITY NOTE — API key embedded in the client APK
+ * ─────────────────────────────────────────────────────────────────────
+ * [GEMINI_API_KEY] is baked into the APK at build time via [BuildConfig]. For personal use
+ * this is fine, but any determined person can extract it by decompiling the APK with apktool.
+ *
+ * Recommended mitigations (pick at least option 1):
+ *
+ * 1. **Restrict the key in Google Cloud Console** (easy, do this now):
+ *    console.cloud.google.com → APIs & Services → Credentials → your key →
+ *    "Application restrictions" → Android apps → add your package name +
+ *    the SHA-1 fingerprint of your signing certificate.
+ *    The key will then only accept requests that originate from your signed APK.
+ *    Get the fingerprint: `./gradlew signingReport`
+ *
+ * 2. **Server-side proxy** (complete solution, more effort):
+ *    Move the key to a backend (e.g. Cloud Run / Firebase Functions).
+ *    The app calls your backend which calls Gemini — the key never reaches the device.
+ *
+ * 3. **Firebase App Check** (already partially configured in this project):
+ *    Combine with option 1 or 2 to prevent non-app clients from abusing your endpoint.
+ */
 class GeminiVisualTranslator {
 
     private val client = OkHttpClient.Builder()
@@ -32,128 +56,93 @@ class GeminiVisualTranslator {
         targetLang: SupportedLanguage
     ): Result<List<TextOverlay>> = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.GEMINI_API_KEY
-        val hasApiKey = apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY"
+        val hasValidApiKey = apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY"
 
-        if (hasApiKey) {
-            try {
-                val base64Image = bitmapToBase64(bitmap)
-                val promptText = buildPrompt(sourceLang, targetLang)
-
-                val requestJson = JSONObject().apply {
-                    val contentsArray = JSONArray().apply {
-                        val partsArray = JSONArray().apply {
-                            put(JSONObject().put("text", promptText))
-                            put(JSONObject().put("inlineData", JSONObject().apply {
-                                put("mimeType", "image/jpeg")
-                                put("data", base64Image)
-                            }))
-                        }
-                        put(JSONObject().put("parts", partsArray))
-                    }
-                    put("contents", contentsArray)
-
-                    val genConfig = JSONObject().apply {
-                        put("responseMimeType", "application/json")
-                        put("temperature", 0.2)
-                    }
-                    put("generationConfig", genConfig)
-                }
-
-                val requestUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
-
-                val body = requestJson.toString().toRequestBody("application/json".toMediaType())
-                val request = Request.Builder()
-                    .url(requestUrl)
-                    .post(body)
-                    .build()
-
-                val response = client.newCall(request).execute()
-                val responseBodyString = response.body?.string() ?: ""
-
-                if (response.isSuccessful) {
-                    val jsonResponse = JSONObject(responseBodyString)
-                    val candidates = jsonResponse.optJSONArray("candidates")
-                    if (candidates != null && candidates.length() > 0) {
-                        val content = candidates.getJSONObject(0).optJSONObject("content")
-                        val parts = content?.optJSONArray("parts")
-                        val rawText = parts?.optJSONObject(0)?.optString("text") ?: ""
-
-                        val textOverlays = parseOverlaysFromJson(rawText)
-                        if (textOverlays.isNotEmpty()) {
-                            return@withContext Result.success(textOverlays)
-                        }
-                    }
-                } else {
-                    Log.e("GeminiTranslator", "API error code ${response.code}: $responseBodyString")
-                }
-            } catch (e: Exception) {
-                Log.e("GeminiTranslator", "Failed to translate image via Gemini API", e)
-            }
+        if (!hasValidApiKey) {
+            Log.e("GeminiTranslator", "API key is missing or is still the placeholder value.")
+            return@withContext Result.failure(
+                IllegalStateException("Gemini API key not configured. Set GEMINI_API_KEY in local.properties.")
+            )
         }
 
-        // Fallback translation overlays mapped precisely to manga speech bubbles on screen
-        Log.i("GeminiTranslator", "Using intelligent OCR translation overlay fallback.")
-        val isEng = targetLang == SupportedLanguage.ENGLISH
-        val fallbackOverlays = listOf(
-            TextOverlay(
-                originalText = "エルバフ 「西の村」",
-                translatedText = if (isEng) "Elbaf: West Village" else "Elbaf: Vila do Oeste",
-                box = BoundingBox(yMin = 3f, xMin = 78f, yMax = 11f, xMax = 95f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "こりゃ いかん!!",
-                translatedText = if (isEng) "This is bad!!" else "Isso é péssimo!!",
-                box = BoundingBox(yMin = 3f, xMin = 56f, yMax = 12f, xMax = 70f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "急げ!!",
-                translatedText = if (isEng) "Hurry up!!" else "Depressa!!",
-                box = BoundingBox(yMin = 3f, xMin = 14f, yMax = 12f, xMax = 28f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "うおぉ せいへい~~!!",
-                translatedText = if (isEng) "Uooh, soldiers!!" else "Uooh, soldados!!",
-                box = BoundingBox(yMin = 41f, xMin = 74f, yMax = 48f, xMax = 88f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "ヤバそうな 気配だ 影に入れ!!",
-                translatedText = if (isEng) "Dangerous vibe... get in shadows!!" else "Sensação perigosa... fiquem na sombra!!",
-                box = BoundingBox(yMin = 41f, xMin = 50f, yMax = 48f, xMax = 68f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "絶対 見ちゃ ダメだ!!",
-                translatedText = if (isEng) "Don't look no matter what!!" else "Não olhe de jeito nenhum!!",
-                box = BoundingBox(yMin = 41f, xMin = 32f, yMax = 48f, xMax = 48f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "お願い!! 戻って来いよ!!",
-                translatedText = if (isEng) "Please!! Come back!!" else "Por favor!! Voltem!!",
-                box = BoundingBox(yMin = 65f, xMin = 76f, yMax = 73f, xMax = 92f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            ),
-            TextOverlay(
-                originalText = "何と 悪のねぇ 解放された 気分!!!",
-                translatedText = if (isEng) "Such a liberating feeling!!!" else "Que sensação incrível de libertação!!!",
-                box = BoundingBox(yMin = 65f, xMin = 10f, yMax = 75f, xMax = 28f),
-                isVertical = true,
-                bubbleType = "SPEECH"
-            )
-        )
+        try {
+            val base64Image = bitmapToBase64(bitmap)
+            val promptText = buildPrompt(sourceLang, targetLang)
 
-        Result.success(fallbackOverlays)
+            val requestJson = JSONObject().apply {
+                val contentsArray = JSONArray().apply {
+                    val partsArray = JSONArray().apply {
+                        put(JSONObject().put("text", promptText))
+                        put(JSONObject().put("inlineData", JSONObject().apply {
+                            put("mimeType", "image/jpeg")
+                            put("data", base64Image)
+                        }))
+                    }
+                    put(JSONObject().put("parts", partsArray))
+                }
+                put("contents", contentsArray)
+
+                val genConfig = JSONObject().apply {
+                    put("responseMimeType", "application/json")
+                    put("temperature", 0.2)
+                }
+                put("generationConfig", genConfig)
+            }
+
+            val requestUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+
+            val body = requestJson.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url(requestUrl)
+                .post(body)
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBodyString = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                Log.e("GeminiTranslator", "API error ${response.code}: $responseBodyString")
+                return@withContext Result.failure(
+                    Exception("Gemini API returned HTTP ${response.code}. Check your API key and quota.")
+                )
+            }
+
+            val jsonResponse = JSONObject(responseBodyString)
+            val candidates = jsonResponse.optJSONArray("candidates")
+
+            if (candidates == null || candidates.length() == 0) {
+                Log.e("GeminiTranslator", "No candidates in response: $responseBodyString")
+                return@withContext Result.failure(
+                    Exception("Gemini returned no candidates. The image may have been blocked by safety filters.")
+                )
+            }
+
+            val content = candidates.getJSONObject(0).optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            val rawText = parts?.optJSONObject(0)?.optString("text") ?: ""
+
+            if (rawText.isBlank()) {
+                Log.e("GeminiTranslator", "Gemini returned empty text content.")
+                return@withContext Result.failure(
+                    Exception("Gemini returned an empty response. The model may not have found any text.")
+                )
+            }
+
+            val textOverlays = parseOverlaysFromJson(rawText)
+
+            if (textOverlays.isEmpty()) {
+                Log.w("GeminiTranslator", "Parsed 0 overlays from response: $rawText")
+                return@withContext Result.failure(
+                    Exception("No text regions found in the image. Try on a page with visible speech bubbles.")
+                )
+            }
+
+            Result.success(textOverlays)
+
+        } catch (e: Exception) {
+            Log.e("GeminiTranslator", "Translation request failed", e)
+            Result.failure(Exception("Translation failed: ${e.message}", e))
+        }
     }
 
     private fun bitmapToBase64(bitmap: Bitmap): String {

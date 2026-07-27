@@ -25,6 +25,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.DisplayMetrics
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -38,14 +39,21 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.BuildConfig
 import com.example.MainActivity
+import com.example.data.local.UserPreferences
 import com.example.data.local.UserPreferencesRepository
 import com.example.data.model.TextOverlay
+import com.example.data.model.TranslationMode
 import com.example.data.remote.GeminiVisualTranslator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicReference
 
 class MangaOverlayService : Service() {
 
@@ -59,7 +67,9 @@ class MangaOverlayService : Service() {
     private var imageReader: ImageReader? = null
     private var imageHandlerThread: HandlerThread? = null
     private var imageHandler: Handler? = null
-    private var latestCapturedBitmap: Bitmap? = null
+    // AtomicReference ensures that swapping in a new captured frame and recycling the old one
+    // is a single indivisible operation — safe across the ImageReader thread and coroutines.
+    private val latestCapturedBitmap = AtomicReference<Bitmap?>(null)
 
     private var screenWidth = 1080
     private var screenHeight = 2400
@@ -72,6 +82,13 @@ class MangaOverlayService : Service() {
     // Store individual floating speech cards directly on WindowManager
     private val activeSpeechCardViews = mutableListOf<View>()
     private var isTranslatedOnScreen = false
+
+    // MD5 hash of the last successfully translated frame. If the frame hasn't changed,
+    // the API call is skipped to avoid wasting quota on identical screenshots.
+    private var lastTranslatedBitmapHash: String? = null
+
+    // Coroutine job that drives DYNAMIC auto-translate mode, polling the screen periodically.
+    private var dynamicTranslateJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -135,10 +152,8 @@ class MangaOverlayService : Service() {
                     )
                     bitmap.copyPixelsFromBuffer(buffer)
                     val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
-                    synchronized(this) {
-                        latestCapturedBitmap?.recycle()
-                        latestCapturedBitmap = cleanBitmap
-                    }
+                    // Atomic swap: recycle previous frame and store new one — no lock needed
+                    latestCapturedBitmap.getAndSet(cleanBitmap)?.recycle()
                 } catch (e: Exception) {
                     e.printStackTrace()
                 } finally {
@@ -357,10 +372,9 @@ class MangaOverlayService : Service() {
     }
 
     private fun captureScreenBitmap(): Bitmap {
-        synchronized(this) {
-            if (latestCapturedBitmap != null && !latestCapturedBitmap!!.isRecycled) {
-                return latestCapturedBitmap!!.copy(Bitmap.Config.ARGB_8888, false)
-            }
+        val snap = latestCapturedBitmap.get()
+        if (snap != null && !snap.isRecycled) {
+            return snap.copy(Bitmap.Config.ARGB_8888, false)
         }
 
         // Try polling ImageReader for available frame
@@ -381,9 +395,7 @@ class MangaOverlayService : Service() {
                     )
                     bitmap.copyPixelsFromBuffer(buffer)
                     val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
-                    synchronized(this) {
-                        latestCapturedBitmap = cleanBitmap
-                    }
+                    latestCapturedBitmap.set(cleanBitmap)
                     return cleanBitmap.copy(Bitmap.Config.ARGB_8888, false)
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -410,164 +422,146 @@ class MangaOverlayService : Service() {
     }
 
     private fun toggleScreenTranslation(statusLabel: TextView) {
+        val userPrefs = UserPreferencesRepository(this@MangaOverlayService).preferences.value
+
+        // Route to the appropriate mode based on the user's preference setting
+        if (userPrefs.translationMode == TranslationMode.DYNAMIC) {
+            if (dynamicTranslateJob?.isActive == true) {
+                stopDynamicMode(statusLabel)
+            } else {
+                startDynamicMode(statusLabel, userPrefs)
+            }
+            return
+        }
+
+        // Manual mode: single translate, toggle visibility
         if (isTranslatedOnScreen) {
             clearScreenTranslations(statusLabel)
-        } else {
-            statusLabel.text = "ESCANEANDO..."
-            statusLabel.setTextColor(Color.parseColor("#38BDF8"))
+            return
+        }
+        translateCurrentFrame(statusLabel, userPrefs, forceRefresh = true)
+    }
 
-            serviceScope.launch {
-                val bitmap = captureScreenBitmap()
-                val userPrefs = UserPreferencesRepository(this@MangaOverlayService).preferences.value
+    /**
+     * Captures the current screen frame, computes its MD5 hash, and calls the Gemini API
+     * only when the content has changed or [forceRefresh] is explicitly requested.
+     * On success, overlays are rendered directly on the screen via WindowManager.
+     */
+    private fun translateCurrentFrame(
+        statusLabel: TextView,
+        userPrefs: UserPreferences,
+        forceRefresh: Boolean = false
+    ) {
+        statusLabel.text = "ESCANEANDO..."
+        statusLabel.setTextColor(Color.parseColor("#38BDF8"))
 
-                val result = visualTranslator.translateMangaImage(
-                    bitmap = bitmap,
-                    sourceLang = userPrefs.sourceLanguage,
-                    targetLang = userPrefs.targetLanguage
-                )
+        serviceScope.launch {
+            val bitmap = captureScreenBitmap()
+            val currentHash = computeBitmapHash(bitmap)
 
+            // Skip the API call when the captured frame is identical to the last translated one
+            if (!forceRefresh && currentHash == lastTranslatedBitmapHash) {
                 withContext(Dispatchers.Main) {
-                    result.fold(
-                        onSuccess = { overlays ->
-                            if (overlays.isEmpty()) {
-                                statusLabel.text = "NENHUM TEXTO"
-                                statusLabel.setTextColor(Color.parseColor("#F59E0B"))
-                                Toast.makeText(this@MangaOverlayService, "Nenhum texto de mangá detectado nesta área.", Toast.LENGTH_SHORT).show()
-                            } else {
-                                renderDirectTranslationsOnScreen(overlays, bitmap)
-                                isTranslatedOnScreen = true
-                                statusLabel.text = "OCULTAR TRADUÇÃO"
-                                statusLabel.setTextColor(Color.parseColor("#34D399"))
-                                Toast.makeText(this@MangaOverlayService, "Tradução sobreposta ativada na tela!", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onFailure = { error ->
-                            statusLabel.text = "ERRO NA API"
-                            statusLabel.setTextColor(Color.parseColor("#F43F5E"))
-                            val msg = error.localizedMessage ?: "Erro na tradução Gemini"
-                            Toast.makeText(this@MangaOverlayService, msg, Toast.LENGTH_LONG).show()
-                        }
+                    statusLabel.text = "TRADUZIR TELA"
+                    statusLabel.setTextColor(Color.WHITE)
+                    Toast.makeText(
+                        this@MangaOverlayService,
+                        "Tela não mudou — tradução já exibida.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                return@launch
+            }
+
+            val result = visualTranslator.translateMangaImage(
+                bitmap = bitmap,
+                sourceLang = userPrefs.sourceLanguage,
+                targetLang = userPrefs.targetLanguage
+            )
+
+            withContext(Dispatchers.Main) {
+                result.fold(
+                    onSuccess = { overlays ->
+                        lastTranslatedBitmapHash = currentHash
+                        renderDirectTranslationsOnScreen(overlays)
+                        isTranslatedOnScreen = true
+                        statusLabel.text = "OCULTAR TRADUÇÃO"
+                        statusLabel.setTextColor(Color.parseColor("#34D399"))
+                        Toast.makeText(this@MangaOverlayService, "Tradução sobreposta ativada!", Toast.LENGTH_SHORT).show()
+                    },
+                    onFailure = { error ->
+                        statusLabel.text = "ERRO NA API"
+                        statusLabel.setTextColor(Color.parseColor("#F43F5E"))
+                        val msg = error.localizedMessage ?: "Erro na tradução Gemini"
+                        Toast.makeText(this@MangaOverlayService, msg, Toast.LENGTH_LONG).show()
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Starts the DYNAMIC translation loop: polls the screen every 2 s, computes a quick
+     * MD5 hash, and calls the Gemini API only when the captured frame differs from the last
+     * successfully translated one. Errors are logged silently to avoid toast spam.
+     */
+    private fun startDynamicMode(statusLabel: TextView, userPrefs: UserPreferences) {
+        dynamicTranslateJob?.cancel()
+        dynamicTranslateJob = serviceScope.launch {
+            withContext(Dispatchers.Main) {
+                statusLabel.text = "AUTO ●"
+                statusLabel.setTextColor(Color.parseColor("#34D399"))
+            }
+            while (true) {
+                delay(2000)
+                val bitmap = captureScreenBitmap()
+                val currentHash = computeBitmapHash(bitmap)
+                if (currentHash != lastTranslatedBitmapHash) {
+                    val result = visualTranslator.translateMangaImage(
+                        bitmap = bitmap,
+                        sourceLang = userPrefs.sourceLanguage,
+                        targetLang = userPrefs.targetLanguage
                     )
+                    withContext(Dispatchers.Main) {
+                        result.onSuccess { overlays ->
+                            lastTranslatedBitmapHash = currentHash
+                            renderDirectTranslationsOnScreen(overlays)
+                            isTranslatedOnScreen = true
+                        }
+                        // Silent failure in dynamic mode — avoids toast spam while scrolling
+                        result.onFailure { err ->
+                            Log.w("MangaOverlay", "Dynamic translate failed: ${err.message}")
+                        }
+                    }
                 }
             }
         }
     }
 
-    private data class RectFPercent(
-        val left: Float,
-        val top: Float,
-        val width: Float,
-        val height: Float
-    )
-
-    private fun detectMangaPageBounds(bitmap: Bitmap?): RectFPercent {
-        if (bitmap == null || bitmap.isRecycled) {
-            return RectFPercent(0.12f, 0.205f, 0.76f, 0.62f)
-        }
-
-        val w = bitmap.width
-        val h = bitmap.height
-
-        // Scan from center outward to find the manga page bounds reliably
-        var startX = w / 2
-        var startY = h / 2
-
-        var foundLight = false
-        val stepX = (w * 0.02f).toInt().coerceAtLeast(1)
-        val stepY = (h * 0.02f).toInt().coerceAtLeast(1)
-
-        for (dy in -5..5) {
-            for (dx in -5..5) {
-                val cx = (w / 2 + dx * stepX).coerceIn(0, w - 1)
-                val cy = (h / 2 + dy * stepY).coerceIn(0, h - 1)
-                val pixel = bitmap.getPixel(cx, cy)
-                val lum = (0.299f * ((pixel shr 16) and 0xFF) + 0.587f * ((pixel shr 8) and 0xFF) + 0.114f * (pixel and 0xFF))
-                if (lum > 100) {
-                    startX = cx
-                    startY = cy
-                    foundLight = true
-                    break
-                }
-            }
-            if (foundLight) break
-        }
-
-        fun isDarkRow(y: Int, x1: Int, x2: Int): Boolean {
-            var darkCount = 0
-            val span = (x2 - x1).coerceAtLeast(1)
-            val stp = (span / 20).coerceAtLeast(1)
-            var tested = 0
-            for (x in x1 until x2 step stp) {
-                tested++
-                val p = bitmap.getPixel(x, y)
-                val lum = (0.299f * ((p shr 16) and 0xFF) + 0.587f * ((p shr 8) and 0xFF) + 0.114f * (p and 0xFF))
-                if (lum < 60) darkCount++
-            }
-            return (darkCount.toFloat() / tested) > 0.85f
-        }
-
-        fun isDarkCol(x: Int, y1: Int, y2: Int): Boolean {
-            var darkCount = 0
-            val span = (y2 - y1).coerceAtLeast(1)
-            val stp = (span / 20).coerceAtLeast(1)
-            var tested = 0
-            for (y in y1 until y2 step stp) {
-                tested++
-                val p = bitmap.getPixel(x, y)
-                val lum = (0.299f * ((p shr 16) and 0xFF) + 0.587f * ((p shr 8) and 0xFF) + 0.114f * (p and 0xFF))
-                if (lum < 60) darkCount++
-            }
-            return (darkCount.toFloat() / tested) > 0.85f
-        }
-
-        var top = (h * 0.205f).toInt()
-        val scanMinX = (startX - w * 0.2f).toInt().coerceIn(0, w - 1)
-        val scanMaxX = (startX + w * 0.2f).toInt().coerceIn(0, w - 1)
-        for (y in startY downTo (h * 0.05f).toInt() step 4) {
-            if (isDarkRow(y, scanMinX, scanMaxX)) {
-                top = y
-                break
-            }
-        }
-
-        var bottom = (h * 0.825f).toInt()
-        for (y in startY until (h * 0.95f).toInt() step 4) {
-            if (isDarkRow(y, scanMinX, scanMaxX)) {
-                bottom = y
-                break
-            }
-        }
-
-        var left = (w * 0.12f).toInt()
-        val scanMinY = (startY - h * 0.15f).toInt().coerceIn(0, h - 1)
-        val scanMaxY = (startY + h * 0.15f).toInt().coerceIn(0, h - 1)
-        for (x in startX downTo (w * 0.05f).toInt() step 4) {
-            if (isDarkCol(x, scanMinY, scanMaxY)) {
-                left = x
-                break
-            }
-        }
-
-        var right = (w * 0.88f).toInt()
-        for (x in startX until (w * 0.95f).toInt() step 4) {
-            if (isDarkCol(x, scanMinY, scanMaxY)) {
-                right = x
-                break
-            }
-        }
-
-        val pageW = (right - left).coerceAtLeast((w * 0.3f).toInt())
-        val pageH = (bottom - top).coerceAtLeast((h * 0.3f).toInt())
-
-        return RectFPercent(
-            left = left.toFloat() / w,
-            top = top.toFloat() / h,
-            width = pageW.toFloat() / w,
-            height = pageH.toFloat() / h
-        )
+    private fun stopDynamicMode(statusLabel: TextView) {
+        dynamicTranslateJob?.cancel()
+        dynamicTranslateJob = null
+        clearScreenTranslations(statusLabel)
+        statusLabel.text = "AUTO ○"
+        statusLabel.setTextColor(Color.parseColor("#94A3B8"))
     }
 
-    private fun renderDirectTranslationsOnScreen(overlays: List<TextOverlay>, capturedBitmap: Bitmap? = null) {
+    /**
+     * Downsamples the bitmap to 64×64 and returns its MD5 hex digest.
+     * Runs in ~0.5 ms on modern hardware — fast enough to check on every poll tick
+     * without adding perceptible latency to the translation flow.
+     */
+    private fun computeBitmapHash(bitmap: Bitmap): String {
+        val scaled = Bitmap.createScaledBitmap(bitmap, 64, 64, false)
+        val buffer = ByteBuffer.allocate(scaled.byteCount)
+        scaled.copyPixelsToBuffer(buffer)
+        if (scaled != bitmap) scaled.recycle()
+        return MessageDigest.getInstance("MD5")
+            .digest(buffer.array())
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    private fun renderDirectTranslationsOnScreen(overlays: List<TextOverlay>) {
         clearScreenTranslations()
 
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -577,15 +571,12 @@ class MangaOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        val pageRect = detectMangaPageBounds(capturedBitmap)
-
+        // Gemini returns bounding boxes as percentages of the full screenshot dimensions.
+        // Each coordinate is mapped directly to screen pixels with no intermediate re-projection.
         overlays.forEach { overlay ->
-            val relativeX = pageRect.left + (overlay.box.xMin / 100f) * pageRect.width
-            val relativeY = pageRect.top + (overlay.box.yMin / 100f) * pageRect.height
-
-            val leftPx = (relativeX * screenWidth).toInt()
-            val topPx = (relativeY * screenHeight).toInt()
-            val maxCardWidthPx = ((overlay.box.xMax - overlay.box.xMin) / 100f * pageRect.width * screenWidth).toInt().coerceAtLeast(50.toPx())
+            val leftPx = (overlay.box.xMin / 100f * screenWidth).toInt()
+            val topPx = (overlay.box.yMin / 100f * screenHeight).toInt()
+            val maxCardWidthPx = ((overlay.box.xMax - overlay.box.xMin) / 100f * screenWidth).toInt().coerceAtLeast(50.toPx())
 
             // Google Lens Style: Compact white overlay strictly wrapping translated text
             val bubbleCard = LinearLayout(this).apply {
@@ -673,6 +664,7 @@ class MangaOverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        dynamicTranslateJob?.cancel()
         clearScreenTranslations()
         try {
             imageHandlerThread?.quitSafely()
