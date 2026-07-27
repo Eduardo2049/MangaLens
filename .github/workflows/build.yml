@@ -1,0 +1,93 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'          # triggers on v1.0, v1.2.3, etc.
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:   # allows manual trigger from the GitHub UI
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Java ─────────────────────────────────────────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ── Android SDK ──────────────────────────────────────────────────────────
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── Gradle wrapper permissions ───────────────────────────────────────────
+      - name: Grant execute permission to gradlew
+        run: chmod +x gradlew
+
+      # ── Gemini API key ───────────────────────────────────────────────────────
+      # Store your key as a repository secret named GEMINI_API_KEY:
+      # Settings → Secrets and variables → Actions → New repository secret
+      - name: Inject Gemini API key into .env
+        run: echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+
+      # ── Build Debug APK ──────────────────────────────────────────────────────
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      # ── Upload debug APK as workflow artifact ────────────────────────────────
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaLens-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      # ── Build Release APK (only on version tags) ─────────────────────────────
+      - name: Build release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: ./gradlew assembleRelease --stacktrace
+        env:
+          # Set these secrets if you have a signing keystore:
+          # KEYSTORE_PATH, STORE_PASSWORD, KEY_PASSWORD
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      # ── Create GitHub Release with both APKs ─────────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "MangaLens ${{ github.ref_name }}"
+          body: |
+            ## MangaLens ${{ github.ref_name }}
+
+            ### Download
+            | Variante | Quando usar |
+            |---|---|
+            | `MangaLens-debug.apk` | Testes — logs habilitados |
+            | `MangaLens-release.apk` | Uso diário — otimizado |
+
+            ### Instalar
+            ```bash
+            adb install MangaLens-debug.apk
+            ```
+
+            ### Configuração obrigatória
+            Adicione sua chave Gemini no arquivo `.env` na raiz do projeto antes de compilar.
+            Veja o README para instruções completas.
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+          draft: false
+          prerelease: false

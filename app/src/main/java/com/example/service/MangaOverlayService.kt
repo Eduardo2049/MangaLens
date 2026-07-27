@@ -87,8 +87,19 @@ class MangaOverlayService : Service() {
     // the API call is skipped to avoid wasting quota on identical screenshots.
     private var lastTranslatedBitmapHash: String? = null
 
+    // Hash of the last frame that was *attempted* (regardless of success or failure).
+    // Prevents the dynamic loop from retrying the same frozen image on every poll tick
+    // when the API keeps failing (rate limit, safety filter, network error, etc.).
+    private var lastAttemptedBitmapHash: String? = null
+
     // Coroutine job that drives DYNAMIC auto-translate mode, polling the screen periodically.
     private var dynamicTranslateJob: Job? = null
+
+    // Reference to the floating button label, kept so the preference observer can update it.
+    private var floatingLabel: TextView? = null
+
+    // Shared preferences repository — single instance reused across the service lifetime.
+    private val prefsRepo by lazy { UserPreferencesRepository(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -103,6 +114,19 @@ class MangaOverlayService : Service() {
 
         startForegroundServiceNotification()
         setupFloatingOverlay()
+
+        // Observe preference changes so that switching mode in Settings automatically
+        // starts or stops the dynamic polling job without requiring a button tap.
+        serviceScope.launch {
+            prefsRepo.preferences.collect { prefs ->
+                val label = floatingLabel ?: return@collect
+                if (prefs.translationMode != TranslationMode.DYNAMIC && dynamicTranslateJob?.isActive == true) {
+                    stopDynamicMode(label)
+                    label.text = "TRADUZIR TELA"
+                    label.setTextColor(Color.WHITE)
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -268,6 +292,7 @@ class MangaOverlayService : Service() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         }
+        floatingLabel = label
 
         // Button to Clear Translations on screen
         val btnClear = TextView(this).apply {
@@ -422,7 +447,7 @@ class MangaOverlayService : Service() {
     }
 
     private fun toggleScreenTranslation(statusLabel: TextView) {
-        val userPrefs = UserPreferencesRepository(this@MangaOverlayService).preferences.value
+        val userPrefs = prefsRepo.preferences.value
 
         // Route to the appropriate mode based on the user's preference setting
         if (userPrefs.translationMode == TranslationMode.DYNAMIC) {
@@ -503,7 +528,8 @@ class MangaOverlayService : Service() {
     /**
      * Starts the DYNAMIC translation loop: polls the screen every 2 s, computes a quick
      * MD5 hash, and calls the Gemini API only when the captured frame differs from the last
-     * successfully translated one. Errors are logged silently to avoid toast spam.
+     * *attempted* frame (not just the last successful one). This prevents infinite retries
+     * on the same image when the API keeps failing.
      */
     private fun startDynamicMode(statusLabel: TextView, userPrefs: UserPreferences) {
         dynamicTranslateJob?.cancel()
@@ -516,22 +542,25 @@ class MangaOverlayService : Service() {
                 delay(2000)
                 val bitmap = captureScreenBitmap()
                 val currentHash = computeBitmapHash(bitmap)
-                if (currentHash != lastTranslatedBitmapHash) {
-                    val result = visualTranslator.translateMangaImage(
-                        bitmap = bitmap,
-                        sourceLang = userPrefs.sourceLanguage,
-                        targetLang = userPrefs.targetLanguage
-                    )
-                    withContext(Dispatchers.Main) {
-                        result.onSuccess { overlays ->
-                            lastTranslatedBitmapHash = currentHash
-                            renderDirectTranslationsOnScreen(overlays)
-                            isTranslatedOnScreen = true
-                        }
-                        // Silent failure in dynamic mode — avoids toast spam while scrolling
-                        result.onFailure { err ->
-                            Log.w("MangaOverlay", "Dynamic translate failed: ${err.message}")
-                        }
+
+                // Skip frames already attempted (success or failure) to avoid API hammering
+                if (currentHash == lastAttemptedBitmapHash) continue
+                lastAttemptedBitmapHash = currentHash
+
+                val result = visualTranslator.translateMangaImage(
+                    bitmap = bitmap,
+                    sourceLang = userPrefs.sourceLanguage,
+                    targetLang = userPrefs.targetLanguage
+                )
+                withContext(Dispatchers.Main) {
+                    result.onSuccess { overlays ->
+                        lastTranslatedBitmapHash = currentHash
+                        renderDirectTranslationsOnScreen(overlays)
+                        isTranslatedOnScreen = true
+                    }
+                    // Silent failure — errors are logged without toast to avoid scroll interruption
+                    result.onFailure { err ->
+                        Log.w("MangaOverlay", "Dynamic translate failed: ${err.message}")
                     }
                 }
             }
@@ -541,6 +570,7 @@ class MangaOverlayService : Service() {
     private fun stopDynamicMode(statusLabel: TextView) {
         dynamicTranslateJob?.cancel()
         dynamicTranslateJob = null
+        lastAttemptedBitmapHash = null
         clearScreenTranslations(statusLabel)
         statusLabel.text = "AUTO ○"
         statusLabel.setTextColor(Color.parseColor("#94A3B8"))

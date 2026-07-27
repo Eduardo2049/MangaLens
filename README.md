@@ -10,6 +10,7 @@
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Latest-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini%202.5%20Flash-API-8E75B2?style=flat-square&logo=google&logoColor=white)
+![CI](https://img.shields.io/github/actions/workflow/status/Eduardo2049/MangaLens/build.yml?style=flat-square&label=CI%20build)
 ![License](https://img.shields.io/badge/Licença-MIT-22C55E?style=flat-square)
 
 </div>
@@ -87,8 +88,11 @@ cd MangaLens
 echo "GEMINI_API_KEY=SUA_CHAVE_AQUI" > .env
 
 # 3. Compile e instale via Android Studio
-#    ou via linha de comando:
+#    ou via linha de comando (Linux/macOS):
 ./gradlew installDebug
+
+#    Windows (PowerShell):
+.\gradlew.bat installDebug
 ```
 
 ### Opção B — Instalar APK diretamente
@@ -130,7 +134,8 @@ Crie o arquivo `.env` na **raiz do projeto** (mesmo nível de `settings.gradle.k
 GEMINI_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
-> O `.env` já está no `.gitignore`. Nunca commite sua chave real. O arquivo `.env.example` com o placeholder é seguro para o repositório.
+> O `.env` já está no `.gitignore`. Nunca commite sua chave real.
+> Copie `.env.example` como ponto de partida: `cp .env.example .env`
 
 ### 3. Restringir a chave (recomendado)
 
@@ -160,6 +165,9 @@ Para que a chave só funcione originada do seu APK assinado:
 
 ```
 MangaLens/
+├── .github/
+│   └── workflows/
+│       └── build.yml       # CI/CD: build + publicação de APK no GitHub Releases
 ├── app/src/main/java/com/example/
 │   ├── data/
 │   │   ├── local/          # Room DB (histórico) + SharedPreferences (configurações)
@@ -173,7 +181,8 @@ MangaLens/
 │   │   ├── components/     # Componentes reutilizáveis de UI
 │   │   └── theme/          # Tema dark mode e paleta de cores
 │   └── MainActivity.kt
-└── .env.example            # Template de configuração da chave de API
+├── gradlew / gradlew.bat   # Gradle Wrapper (Linux/macOS e Windows)
+└── .env.example            # Template — copie para .env e substitua pela sua chave
 ```
 
 ---
@@ -192,6 +201,7 @@ MangaLens/
 | HTTP | OkHttp 4 |
 | Async | Kotlin Coroutines |
 | Segredos de build | Secrets Gradle Plugin |
+| CI/CD | GitHub Actions |
 
 ---
 
@@ -213,6 +223,46 @@ MangaLens/
 | 🇯🇵 Japonês | ✅ |
 | 🇰🇷 Coreano | ✅ |
 | 🇨🇳 Chinês | ✅ |
+
+---
+
+## CI/CD — GitHub Actions
+
+O repositório inclui um workflow (`.github/workflows/build.yml`) que automatiza o build:
+
+| Trigger | O que acontece |
+|---|---|
+| Pull request | Build debug APK — resultado disponível como artifact na aba Actions |
+| Push em qualquer branch | Idem |
+| Tag `v*` (ex.: `v1.0.0`) | Build debug **e** release + cria GitHub Release com os dois APKs |
+
+### Configurar o secret da chave Gemini no repositório
+
+1. Acesse **Settings → Secrets and variables → Actions → New repository secret**
+2. Nome: `GEMINI_API_KEY` | Valor: sua chave real
+
+O workflow injeta o secret no `.env` automaticamente a cada build.
+
+### Publicar uma nova versão
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+# O GitHub Actions builda e publica o Release automaticamente
+```
+
+---
+
+## Troubleshooting
+
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| Overlay não aparece após iniciar | Permissão de sobreposição não concedida | `Configurações → Aplicativos → MangaLens → Permissões → Exibir sobre outros apps` |
+| `ERRO NA API` no botão flutuante | Chave inválida ou cota esgotada | Verifique o `.env`, cheque a cota em [aistudio.google.com](https://aistudio.google.com) |
+| Tradução não sincroniza com o scroll | Modo manual não detecta mudança de página automaticamente | Ative o Modo Dinâmico nas preferências do app |
+| Balões traduzidos aparecem deslocados | Resolução de tela diverge do que a captura detectou | Reinicie o serviço — ele relê as dimensões ao iniciar |
+| `./gradlew` não reconhecido (Windows) | Shell não suporta prefixo `./` | Use `.\gradlew.bat installDebug` no PowerShell |
+| Build falha com erro de chave ausente | `GEMINI_API_KEY` não definida no `.env` | Copie `.env.example` para `.env` e substitua pelo valor real |
 
 ---
 
