@@ -17,6 +17,7 @@ import com.example.data.remote.GeminiVisualTranslator
 import com.example.data.samples.MangaChapterSample
 import com.example.data.samples.SampleMangaData
 import kotlinx.coroutines.Job
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,38 +80,13 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         loadActiveOverlays()
     }
 
-    fun selectChapter(index: Int) {
-        if (index in _uiState.value.chapters.indices) {
-            _uiState.value = _uiState.value.copy(
-                selectedChapterIndex = index,
-                selectedPanelIndex = 0,
-                customBitmap = null,
-                statusMessage = null
-            )
-            val chapter = _uiState.value.chapters[index]
-            prefsRepo.updateSourceLanguage(chapter.defaultSourceLang)
-            loadActiveOverlays()
-        }
-    }
-
-    fun selectPanel(panelIndex: Int) {
-        val chapter = currentChapter
-        if (chapter != null && panelIndex in chapter.panels.indices) {
-            _uiState.value = _uiState.value.copy(
-                selectedPanelIndex = panelIndex,
-                statusMessage = null
-            )
-            loadActiveOverlays()
-        }
-    }
-
     fun setCustomBitmap(bitmap: Bitmap?) {
         _uiState.value = _uiState.value.copy(
             customBitmap = bitmap,
             selectedPanelIndex = 0,
             statusMessage = "Imagem carregada. Traduzindo..."
         )
-        triggerTranslation(forceManual = true)
+        triggerTranslation()
     }
 
     private val currentChapter: MangaChapterSample?
@@ -120,7 +96,7 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         val custom = _uiState.value.customBitmap
         if (custom != null) {
             // Trigger translation for custom image
-            triggerTranslation(forceManual = false)
+            triggerTranslation()
             return
         }
 
@@ -128,19 +104,19 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         val panel = chapter?.panels?.getOrNull(_uiState.value.selectedPanelIndex)
         if (panel != null) {
             _uiState.value = _uiState.value.copy(
-                activeOverlays = panel.sampleOverlays
+                activeOverlays = panel.sampleOverlays,
             )
         }
     }
 
-    fun triggerTranslation(forceManual: Boolean = false) {
+    fun triggerTranslation() {
         val prefs = _uiState.value.userPreferences
         if (!prefs.isTranslationEnabled) return
 
         _uiState.value = _uiState.value.copy(isProcessing = true)
 
         viewModelScope.launch {
-            delay(400) // Smooth visual feedback
+            delay(400.milliseconds) // Smooth visual feedback
 
             val bitmapToProcess = _uiState.value.customBitmap
 
@@ -184,18 +160,6 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    // Dynamic scroll trigger (debounced for webtoon scrolling)
-    fun onUserScrolled() {
-        val prefs = _uiState.value.userPreferences
-        if (prefs.translationMode != TranslationMode.DYNAMIC || !prefs.isTranslationEnabled) return
-
-        autoTranslateJob?.cancel()
-        autoTranslateJob = viewModelScope.launch {
-            delay(1200) // Debounce 1.2s after scroll stops to avoid API spamming
-            triggerTranslation(forceManual = false)
-        }
-    }
-
     private suspend fun saveOverlaysToHistory(overlays: List<TextOverlay>) {
         val prefs = _uiState.value.userPreferences
         val chapterTitle = currentChapter?.title ?: "Manga Personalizado"
@@ -216,7 +180,7 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
     fun setTranslationEnabled(enabled: Boolean) {
         prefsRepo.setTranslationEnabled(enabled)
         if (enabled) {
-            triggerTranslation(forceManual = true)
+            triggerTranslation()
         } else {
             _uiState.value = _uiState.value.copy(activeOverlays = emptyList())
         }
@@ -244,22 +208,6 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     fun updateBubbleStyle(style: String) {
         prefsRepo.updateBubbleStyle(style)
-    }
-
-    fun toggleHistoryVisibility() {
-        _uiState.value = _uiState.value.copy(
-            isHistoryVisible = !_uiState.value.isHistoryVisible
-        )
-    }
-
-    fun closeHistory() {
-        _uiState.value = _uiState.value.copy(isHistoryVisible = false)
-    }
-
-    fun clearHistory() {
-        viewModelScope.launch {
-            historyDao.clearHistory()
-        }
     }
 
     fun openSettings() {
