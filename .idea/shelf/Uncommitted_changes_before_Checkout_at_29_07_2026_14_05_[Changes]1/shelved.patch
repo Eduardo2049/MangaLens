@@ -1,0 +1,73 @@
+Index: .artifacts/c14508d8-7a13-4d92-b693-48673ed5080d/implementation_plan.artifact.md
+===================================================================
+diff --git a/.artifacts/c14508d8-7a13-4d92-b693-48673ed5080d/implementation_plan.artifact.md b/.artifacts/c14508d8-7a13-4d92-b693-48673ed5080d/implementation_plan.artifact.md
+deleted file mode 100644
+--- a/.artifacts/c14508d8-7a13-4d92-b693-48673ed5080d/implementation_plan.artifact.md	(revision 274fc6f8b83dd71c83ede92f98fbda2a3ff0af09)
++++ /dev/null	(revision 274fc6f8b83dd71c83ede92f98fbda2a3ff0af09)
+@@ -1,43 +0,0 @@
+-# Implementation Plan - Technical Refactoring and Fixes
+-
+-I will perform a series of refactorings to improve the project's stability, modularity, and adherence to Android best practices.
+-
+-## User Review Required
+-
+-> [!WARNING]
+-> **API 24 vs 26:** I will re-add guards for API 26 features. This means users on Android 7.0/7.1 will experience degraded functionality (no notification channel description, legacy overlay types). If you'd rather drop support for Android 7, I can bump the `minSdk` to 26 instead.
+-> **Logic Extraction:** I will create a new class for screen capture. This changes the internal structure of `MangaOverlayService`.
+-
+-## Proposed Changes
+-
+-### [Core Refactoring]
+-
+-#### [NEW] [ScreenCaptureManager.kt](file:///C:/Users/eduardo.asousa/Projetos/Pessoal/MangaLens/app/src/main/java/com/example/service/ScreenCaptureManager.kt)
+-- Move all `MediaProjection`, `ImageReader`, and `VirtualDisplay` logic here.
+-- Handle bitmap capturing and recycling in an isolated way.
+-
+-#### [MODIFY] [MangaOverlayService.kt](file:///C:/Users/eduardo.asousa/Projetos/Pessoal/MangaLens/app/src/main/java/com/example/service/MangaOverlayService.kt)
+-- Use `ScreenCaptureManager`.
+-- Re-add `if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)` guards for `TYPE_APPLICATION_OVERLAY`.
+-- Replace `Thread.sleep` with `delay`.
+-- Clean up `WindowManager` additions to avoid "already added" or "not attached" crashes.
+-
+-#### [MODIFY] [GeminiVisualTranslator.kt](file:///C:/Users/eduardo.asousa/Projetos/Pessoal/MangaLens/app/src/main/java/com/example/data/remote/GeminiVisualTranslator.kt)
+-- Improve JSON parsing robustness.
+-- Ensure `Result.failure` includes more context on parsing errors.
+-
+-### [Build Configuration]
+-
+-#### [MODIFY] [app/build.gradle.kts](file:///C:/Users/eduardo.asousa/Projetos/Pessoal/MangaLens/app/build.gradle.kts)
+-- Ensure all dependencies are correctly grouped and there are no stray comments that might confuse the build system.
+-
+-## Verification Plan
+-
+-### Automated Tests
+-- Run `analyze_file` on all components.
+-- Verify no new lint warnings about API compatibility.
+-
+-### Manual Verification
+-- Deploy to an emulator/device.
+-- Verify the floating button still appears and drags correctly.
+-- Verify Manual and Dynamic translation modes still work with the new `ScreenCaptureManager`.
+Index: .gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>*.iml\r\n.gradle\r\n.kotlin\r\n/local.properties\r\n/.idea/caches\r\n/.idea/libraries\r\n/.idea/modules.xml\r\n/.idea/workspace.xml\r\n/.idea/navEditor.xml\r\n/.idea/assetWizardSettings.xml\r\n.DS_Store\r\n/build\r\n/captures\r\n.externalNativeBuild\r\n.cxx\r\nlocal.properties\r\n.env\r\ndebug.keystore\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.gitignore b/.gitignore
+--- a/.gitignore	(revision 274fc6f8b83dd71c83ede92f98fbda2a3ff0af09)
++++ b/.gitignore	(date 1785260348498)
+@@ -10,9 +10,12 @@
+ /.idea/assetWizardSettings.xml
+ .DS_Store
+ /build
++/app/build
+ /captures
+ .externalNativeBuild
+ .cxx
+ local.properties
+ .env
++.env.*
+ debug.keystore
++.build-outputs

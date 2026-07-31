@@ -66,7 +66,9 @@ Ative nas preferências `Modo → Dinâmico`. O botão muda para `AUTO ●`. Man
 
 ## Requisitos
 
-- Android **8.0 (API 26)** ou superior
+- **Java:** JDK 17 (Recomendado: Eclipse Temurin / Adoptium)
+- **Android SDK:** API 35 instalado
+- Android **8.0 (API 26)** ou superior no dispositivo/emulador
 - Permissão de **sobreposição de janelas** (`SYSTEM_ALERT_WINDOW`)
 - Permissão de **captura de tela** (solicitada ao iniciar)
 - Chave de API do **Google Gemini** (gratuita no Google AI Studio)
@@ -262,6 +264,7 @@ git push origin v1.0.0
 | Tradução não sincroniza com o scroll | Modo manual não detecta mudança de página automaticamente | Ative o Modo Dinâmico nas preferências do app |
 | Balões traduzidos aparecem deslocados | Resolução de tela diverge do que a captura detectou | Reinicie o serviço — ele relê as dimensões ao iniciar |
 | `./gradlew` não reconhecido (Windows) | Shell não suporta prefixo `./` | Use `.\gradlew.bat installDebug` no PowerShell |
+| Build falha com `AndroidLocationsException` | Conflito entre `ANDROID_PREFS_ROOT` e `ANDROID_USER_HOME` | Remova a variável `ANDROID_PREFS_ROOT` do sistema e use apenas `ANDROID_USER_HOME` |
 | Build falha com erro de chave ausente | `GEMINI_API_KEY` não definida no `.env` | Copie `.env.example` para `.env` e substitua pelo valor real |
 
 ---
