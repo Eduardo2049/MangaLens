@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
@@ -298,25 +299,34 @@ class MangaOverlayService : Service() {
     private fun translateCurrentFrame(statusLabel: TextView, userPrefs: UserPreferences, forceRefresh: Boolean) {
         statusLabel.text = "ESCANEANDO..."
         statusLabel.setTextColor("#38BDF8".toColorInt())
+        Log.d("MangaLens", "Manual: Iniciando captura...")
 
         serviceScope.launch {
-            val bitmap = screenCaptureManager?.captureBitmap() ?: return@launch
+            val bitmap = screenCaptureManager?.captureBitmap() ?: run {
+                Log.e("MangaLens", "Manual: Falha ao capturar bitmap")
+                return@launch
+            }
             val currentHash = computeBitmapHash(bitmap)
 
             if (!forceRefresh && currentHash == lastTranslatedBitmapHash) {
+                Log.d("MangaLens", "Manual: Tela idêntica à última tradução")
                 withContext(Dispatchers.Main) {
                     statusLabel.text = "TRADUZIR TELA"
                     statusLabel.setTextColor(Color.WHITE)
                     Toast.makeText(this@MangaOverlayService, "Tela não mudou.", Toast.LENGTH_SHORT).show()
                 }
+                bitmap.recycle()
                 return@launch
             }
+            Log.d("MangaLens", "Manual: Enviando para Gemini...")
 
             val result = visualTranslator.translateMangaImage(bitmap, userPrefs.sourceLanguage, userPrefs.targetLanguage)
+            bitmap.recycle()
 
             withContext(Dispatchers.Main) {
                 result.fold(
                     onSuccess = { overlays ->
+                        Log.d("MangaLens", "Manual: Sucesso (${overlays.size} balões)")
                         lastTranslatedBitmapHash = currentHash
                         renderDirectTranslationsOnScreen(overlays)
                         isTranslatedOnScreen = true
@@ -324,6 +334,7 @@ class MangaOverlayService : Service() {
                         statusLabel.setTextColor("#34D399".toColorInt())
                     },
                     onFailure = { error ->
+                        Log.e("MangaLens", "Manual: Erro na tradução: ${error.message}")
                         statusLabel.text = "ERRO NA API"
                         statusLabel.setTextColor("#F43F5E".toColorInt())
                         Toast.makeText(this@MangaOverlayService, error.localizedMessage ?: "Erro Gemini", Toast.LENGTH_LONG).show()
@@ -341,25 +352,44 @@ class MangaOverlayService : Service() {
                 statusLabel.setTextColor("#34D399".toColorInt())
             }
             while (true) {
-                delay(2.seconds)
+                delay(1.seconds)
                 val currentPrefs = prefsRepo.preferences.value
                 if (currentPrefs.translationMode != TranslationMode.DYNAMIC) {
+                    Log.d("MangaLens", "Auto: Parando modo dinâmico (modo alterado)")
                     withContext(Dispatchers.Main) { stopDynamicMode(statusLabel) }
                     break
                 }
 
-                val bitmap = screenCaptureManager?.captureBitmap() ?: continue
+                val bitmap = screenCaptureManager?.captureBitmap() ?: run {
+                    Log.w("MangaLens", "Auto: Bitmap nulo na captura")
+                    continue
+                }
                 val currentHash = computeBitmapHash(bitmap)
 
-                if (currentHash == lastAttemptedBitmapHash) continue
+                if (currentHash == lastAttemptedBitmapHash) {
+                    bitmap.recycle()
+                    continue
+                }
+                Log.d("MangaLens", "Auto: Nova tela detectada, enviando...")
                 lastAttemptedBitmapHash = currentHash
 
                 val result = visualTranslator.translateMangaImage(bitmap, currentPrefs.sourceLanguage, currentPrefs.targetLanguage)
+                bitmap.recycle()
+
                 withContext(Dispatchers.Main) {
                     result.onSuccess { overlays ->
+                        Log.d("MangaLens", "Auto: Sucesso (${overlays.size} balões)")
                         lastTranslatedBitmapHash = currentHash
                         renderDirectTranslationsOnScreen(overlays)
                         isTranslatedOnScreen = true
+                        statusLabel.text = "AUTO ●"
+                        statusLabel.setTextColor("#34D399".toColorInt())
+                    }.onFailure { error ->
+                        Log.e("MangaLens", "Auto: Erro: ${error.message}")
+                        // Reset hash so it can try again on next cycle if it was a transient error
+                        lastAttemptedBitmapHash = null 
+                        statusLabel.text = "ERRO ●"
+                        statusLabel.setTextColor("#F43F5E".toColorInt())
                     }
                 }
             }
@@ -378,7 +408,7 @@ class MangaOverlayService : Service() {
     private fun computeBitmapHash(bitmap: Bitmap): String {
         val scaled = Bitmap.createScaledBitmap(bitmap, 64, 64, false)
         val buffer = ByteBuffer.allocate(scaled.byteCount)
-        scaled.copyPixelsFromBuffer(buffer)
+        scaled.copyPixelsToBuffer(buffer)
         if (scaled != bitmap) scaled.recycle()
         return MessageDigest.getInstance("MD5").digest(buffer.array()).joinToString("") { "%02x".format(it) }
     }

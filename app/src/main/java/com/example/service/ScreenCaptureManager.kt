@@ -9,9 +9,11 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.toColorInt
@@ -41,22 +43,29 @@ class ScreenCaptureManager(private val context: Context) {
             mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, resultData)
 
             val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val metrics = DisplayMetrics()
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.getRealMetrics(metrics)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val metrics = windowManager.currentWindowMetrics
+                screenWidth = metrics.bounds.width()
+                screenHeight = metrics.bounds.height()
+            } else {
+                val metrics = DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.getRealMetrics(metrics)
+                screenWidth = metrics.widthPixels
+                screenHeight = metrics.heightPixels
+            }
+            
+            val density = context.resources.displayMetrics.densityDpi
 
-            screenWidth = metrics.widthPixels
-            screenHeight = metrics.heightPixels
-            val density = metrics.densityDpi
-
-            imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+            // Increased buffer to 3 to avoid "no image available" on fast displays
+            imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 3)
             
             val thread = HandlerThread("ScreenCaptureThread").apply { start() }
             imageHandlerThread = thread
             imageHandler = Handler(thread.looper)
 
             imageReader?.setOnImageAvailableListener({ reader ->
-                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val image = try { reader.acquireLatestImage() } catch (e: Exception) { null } ?: return@setOnImageAvailableListener
                 try {
                     val planes = image.planes
                     val buffer = planes[0].buffer
@@ -72,10 +81,11 @@ class ScreenCaptureManager(private val context: Context) {
                     bitmap.copyPixelsFromBuffer(buffer)
                     val cleanBitmap = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
                     
-                    latestCapturedBitmap.getAndSet(cleanBitmap)?.recycle()
+                    val old = latestCapturedBitmap.getAndSet(cleanBitmap)
+                    if (old != null && !old.isRecycled) old.recycle()
                     if (bitmap != cleanBitmap) bitmap.recycle()
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("MangaLens", "Capture: Erro ao processar frame: ${e.message}")
                 } finally {
                     image.close()
                 }
@@ -86,13 +96,14 @@ class ScreenCaptureManager(private val context: Context) {
                 screenWidth,
                 screenHeight,
                 density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
                 imageReader?.surface,
                 null,
                 imageHandler
             )
+            Log.d("MangaLens", "Capture: VirtualDisplay configurado (${screenWidth}x${screenHeight})")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MangaLens", "Capture: Erro no setup: ${e.message}")
         }
     }
 
@@ -104,7 +115,9 @@ class ScreenCaptureManager(private val context: Context) {
         var snap = latestCapturedBitmap.get()
         
         if (snap == null || snap.isRecycled) {
-            repeat(6) {
+            Log.d("MangaLens", "Capture: Frame não disponível, aguardando mais tempo...")
+            // Increased retry to 15 (750ms) for slow initial captures
+            repeat(15) {
                 delay(50.milliseconds)
                 snap = latestCapturedBitmap.get()
                 if (snap != null && !snap.isRecycled) return@repeat
@@ -112,8 +125,10 @@ class ScreenCaptureManager(private val context: Context) {
         }
 
         return if (snap != null && !snap.isRecycled) {
+            Log.d("MangaLens", "Capture: OK (${snap.width}x${snap.height})")
             Bitmap.createBitmap(snap)
         } else {
+            Log.w("MangaLens", "Capture: Falha total após retentativas, usando fallback")
             createFallbackBitmap()
         }
     }

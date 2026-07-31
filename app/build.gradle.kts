@@ -19,8 +19,8 @@ android {
     applicationId = "com.aistudio.mangalens.trvis"
     minSdk = 24
     targetSdk = 35
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 8
+    versionName = "0.8"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -54,12 +54,8 @@ android {
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 
-  applicationVariants.all {
-    outputs.all {
-      val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-      output.outputFileName = "MangaLens-v${versionName}-${buildType.name}.apk"
-    }
-  }
+  // Reverted to standard APK name to ensure build stability on AGP 9.1.1
+  // Use the default app-debug.apk location
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files

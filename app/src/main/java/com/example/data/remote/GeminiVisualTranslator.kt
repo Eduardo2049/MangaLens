@@ -66,6 +66,7 @@ class GeminiVisualTranslator {
         }
 
         try {
+            Log.d("MangaLens", "API: Iniciando tradução...")
             val base64Image = bitmapToBase64(bitmap)
             val promptText = buildPrompt(sourceLang, targetLang)
 
@@ -89,7 +90,7 @@ class GeminiVisualTranslator {
                 put("generationConfig", genConfig)
             }
 
-            val requestUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+            val requestUrl = "https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=$apiKey"
 
             val body = requestJson.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
@@ -99,9 +100,10 @@ class GeminiVisualTranslator {
 
             val response = client.newCall(request).execute()
             val responseBodyString = response.body?.string() ?: ""
+            Log.d("MangaLens", "API: Resposta recebida (Código: ${response.code})")
 
             if (!response.isSuccessful) {
-                Log.e("GeminiTranslator", "API error ${response.code}: $responseBodyString")
+                Log.e("MangaLens", "API: Erro HTTP ${response.code}: $responseBodyString")
                 return@withContext Result.failure(
                     Exception("Gemini API returned HTTP ${response.code}. Check your API key and quota.")
                 )
@@ -164,6 +166,7 @@ class GeminiVisualTranslator {
         val outputStream = ByteArrayOutputStream()
         scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
         val byteArray = outputStream.toByteArray()
+        if (scaledBitmap != bitmap) scaledBitmap.recycle()
         return Base64.encodeToString(byteArray, Base64.NO_WRAP)
     }
 
