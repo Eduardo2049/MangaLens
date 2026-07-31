@@ -53,6 +53,13 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+
+  applicationVariants.all {
+    outputs.all {
+      val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+      output.outputFileName = "MangaLens-v${versionName}-${buildType.name}.apk"
+    }
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
