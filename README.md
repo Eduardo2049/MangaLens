@@ -6,8 +6,8 @@
 
 *Leia qualquer mangá em qualquer leitor, com tradução sobreposta direto na tela — powered by Gemini AI*
 
-![MangaLens](https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
+![MangaLens](https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Latest-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)
 ![Gemini](https://img.shields.io/badge/Gemini%202.5%20Flash-API-8E75B2?style=flat-square&logo=google&logoColor=white)
 ![CI](https://img.shields.io/github/actions/workflow/status/Eduardo2049/MangaLens/build.yml?style=flat-square&label=CI%20build)
@@ -68,7 +68,7 @@ Ative nas preferências `Modo → Dinâmico`. O botão muda para `AUTO ●`. Man
 
 - **Java:** JDK 17 (Recomendado: Eclipse Temurin / Adoptium)
 - **Android SDK:** API 35 instalado
-- Android **8.0 (API 26)** ou superior no dispositivo/emulador
+- Android **7.0 (API 24)** ou superior
 - Permissão de **sobreposição de janelas** (`SYSTEM_ALERT_WINDOW`)
 - Permissão de **captura de tela** (solicitada ao iniciar)
 - Chave de API do **Google Gemini** (gratuita no Google AI Studio)
@@ -79,7 +79,7 @@ Ative nas preferências `Modo → Dinâmico`. O botão muda para `AUTO ●`. Man
 
 ### Opção A — Compilar do código-fonte
 
-**Pré-requisitos:** Android Studio Iguana+, JDK 11+, Android SDK 36
+**Pré-requisitos:** Android Studio Ladybug+, JDK 17+, Android SDK 36
 
 ```bash
 # 1. Clone o repositório
@@ -87,7 +87,10 @@ git clone https://github.com/Eduardo2049/MangaLens.git
 cd MangaLens
 
 # 2. Configure sua chave Gemini (veja a seção abaixo)
+# No Linux/macOS:
 echo "GEMINI_API_KEY=SUA_CHAVE_AQUI" > .env
+# No Windows (PowerShell):
+echo "GEMINI_API_KEY=SUA_CHAVE_AQUI" | Out-File -Encoding ascii .env
 
 # 3. Compile e instale via Android Studio
 #    ou via linha de comando (Linux/macOS):
@@ -103,8 +106,8 @@ Baixe a versão desejada na seção [Releases](https://github.com/Eduardo2049/Ma
 
 | Variante | Arquivo | Quando usar |
 |---|---|---|
-| **Debug** | `MangaLens-debug.apk` | Desenvolvimento e testes — logs habilitados, sem ofuscação |
-| **Release** | `MangaLens-release.apk` | Uso diário — otimizado, sem logs de depuração |
+| **Debug** | `app-debug.apk` | Desenvolvimento e testes — logs habilitados, sem ofuscação |
+| **Release** | `app-release.apk` | Uso diário — otimizado, sem logs de depuração |
 
 > **⚠️ Atenção:** Para instalar APKs de fontes externas, ative **Fontes desconhecidas** nas configurações do Android:
 > `Configurações → Aplicativos → Instalar apps de fontes desconhecidas`
@@ -112,10 +115,10 @@ Baixe a versão desejada na seção [Releases](https://github.com/Eduardo2049/Ma
 **Instalar via ADB (cabo USB):**
 ```bash
 # Conecte o dispositivo com depuração USB ativada, então:
-adb install MangaLens-debug.apk
+adb install app-debug.apk
 
 # Para substituir uma versão já instalada:
-adb install -r MangaLens-debug.apk
+adb install -r app-debug.apk
 ```
 
 ---

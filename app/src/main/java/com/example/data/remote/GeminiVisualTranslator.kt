@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  *
  * ⚠️  SECURITY NOTE — API key embedded in the client APK
  * ─────────────────────────────────────────────────────────────────────
- * [GEMINI_API_KEY] is baked into the APK at build time via [BuildConfig]. For personal use
+ * `GEMINI_API_KEY` is baked into the APK at build time via [BuildConfig]. For personal use
  * this is fine, but any determined person can extract it by decompiling the APK with apktool.
  *
  * Recommended mitigations (pick at least option 1):
@@ -146,8 +146,9 @@ class GeminiVisualTranslator {
     }
 
     private fun bitmapToBase64(bitmap: Bitmap): String {
-        // Resize bitmap if too huge to keep network payload fast and responsive
-        val maxDimension = 1200
+        // Resize bitmap to keep network payload fast and reduce Gemini API quota consumption.
+        // 1024px max + 75% JPEG quality is sufficient for OCR without sacrificing accuracy.
+        val maxDimension = 1024
         val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
             val aspect = bitmap.width.toFloat() / bitmap.height.toFloat()
             val (w, h) = if (bitmap.width >= bitmap.height) {
@@ -161,7 +162,7 @@ class GeminiVisualTranslator {
         }
 
         val outputStream = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
         val byteArray = outputStream.toByteArray()
         return Base64.encodeToString(byteArray, Base64.NO_WRAP)
     }
@@ -206,31 +207,34 @@ class GeminiVisualTranslator {
     private fun parseOverlaysFromJson(jsonString: String): List<TextOverlay> {
         val list = mutableListOf<TextOverlay>()
         try {
+            // Remove markdown formatting if present
             val cleanJson = jsonString.trim()
                 .removePrefix("```json")
                 .removePrefix("```")
                 .removeSuffix("```")
                 .trim()
 
-            val jsonArray = if (cleanJson.startsWith("[")) {
-                JSONArray(cleanJson)
-            } else if (cleanJson.startsWith("{")) {
-                val obj = JSONObject(cleanJson)
-                obj.optJSONArray("overlays") ?: obj.optJSONArray("items") ?: JSONArray()
-            } else {
-                JSONArray()
+            val jsonArray = when {
+                cleanJson.startsWith("[") -> JSONArray(cleanJson)
+                cleanJson.startsWith("{") -> {
+                    val obj = JSONObject(cleanJson)
+                    // Resilience: look for the array under common keys
+                    obj.optJSONArray("overlays") ?: obj.optJSONArray("items") ?: obj.optJSONArray("textRegions") ?: JSONArray()
+                }
+                else -> JSONArray()
             }
 
             for (i in 0 until jsonArray.length()) {
                 val item = jsonArray.getJSONObject(i)
-                val orig = item.optString("originalText", "").trim()
-                val trans = item.optString("translatedText", "").trim()
+                val orig = item.optString("originalText", item.optString("text", "")).trim()
+                val trans = item.optString("translatedText", item.optString("translation", "")).trim()
 
                 if (orig.isNotEmpty() && trans.isNotEmpty()) {
-                    val yMin = item.optDouble("yMin", 0.0).toFloat().coerceIn(0f, 95f)
-                    val xMin = item.optDouble("xMin", 0.0).toFloat().coerceIn(0f, 95f)
-                    val yMax = item.optDouble("yMax", yMin + 10.0).toFloat().coerceIn(yMin + 2f, 100f)
-                    val xMax = item.optDouble("xMax", xMin + 15.0).toFloat().coerceIn(xMin + 5f, 100f)
+                    // Gemini 2.0+ usually follows 0-100 percentage range for bounding boxes
+                    val yMin = item.optDouble("yMin", 0.0).toFloat().coerceIn(0f, 100f)
+                    val xMin = item.optDouble("xMin", 0.0).toFloat().coerceIn(0f, 100f)
+                    val yMax = item.optDouble("yMax", yMin + 10.0).toFloat().coerceIn(0f, 100f)
+                    val xMax = item.optDouble("xMax", xMin + 15.0).toFloat().coerceIn(0f, 100f)
                     val isVertical = item.optBoolean("isVertical", false)
                     val bubbleType = item.optString("bubbleType", "SPEECH")
 
@@ -246,7 +250,7 @@ class GeminiVisualTranslator {
                 }
             }
         } catch (e: Exception) {
-            Log.e("GeminiTranslator", "Error parsing overlay JSON", e)
+            Log.e("GeminiTranslator", "Error parsing overlay JSON: ${e.message}", e)
         }
         return list
     }
