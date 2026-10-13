@@ -25,12 +25,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Translate
@@ -48,8 +48,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -78,7 +76,7 @@ import com.example.ui.components.SettingsBottomSheet
 @Composable
 fun MangaReaderScreen(
     viewModel: MangaReaderViewModel = viewModel(),
-    onRequestScreenCapture: () -> Unit = {}
+    onRequestScreenCapture: ((Boolean) -> Unit) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -286,9 +284,9 @@ fun MangaReaderScreen(
 
                     Text(
                         text = if (isOverlayActive)
-                            "A bolha flutuante 'TRADUZIR JP' está ativa na tela! Abra o Komikku, Mihon, Tachiyomi ou Kotatsu e toque nela para traduzir os balões."
+                            "A tradução automática está ativa. Abra qualquer leitor de mangá e o texto será traduzido para o idioma selecionado."
                         else
-                            "Ative a bolha de sobreposição para traduzir mangás em japonês instantaneamente enquanto lê no seu app de leitura favorito.",
+                            "Ative uma vez para traduzir automaticamente toda a tela enquanto você lê.",
                         color = Color.White,
                         fontSize = 14.sp,
                         lineHeight = 20.sp
@@ -317,8 +315,9 @@ fun MangaReaderScreen(
                                     viewModel.setOverlayActive(false)
                                     Toast.makeText(context, "Bolha flutuante desativada", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    viewModel.setOverlayActive(true)
-                                    onRequestScreenCapture()
+                                    onRequestScreenCapture { granted ->
+                                        viewModel.setOverlayActive(granted)
+                                    }
                                 }
                             }
                         },
@@ -336,13 +335,13 @@ fun MangaReaderScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = if (isOverlayActive) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                imageVector = if (isOverlayActive) Icons.Default.Stop else Icons.Default.PowerSettingsNew,
                                 contentDescription = null,
                                 tint = Color.White
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isOverlayActive) "DESATIVAR SOBREPOSIÇÃO" else "ATIVAR BOLHA FLUTUANTE",
+                                text = if (isOverlayActive) "DESATIVAR TRADUÇÃO" else "ATIVAR TRADUÇÃO AUTOMÁTICA",
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
@@ -417,44 +416,6 @@ fun MangaReaderScreen(
                         }
                     }
 
-                    // Auto Translate Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = Color(0xFFF59E0B),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Tradução Automática ativada",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Maior precisão em gírias e kanjis de mangá",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = uiState.userPreferences.isTranslationEnabled,
-                            onCheckedChange = { viewModel.setTranslationEnabled(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF6366F1)
-                            )
-                        )
-                    }
                 }
             }
 
@@ -656,7 +617,6 @@ fun MangaReaderScreen(
             onDismiss = { viewModel.closeSettings() },
             onUpdateSourceLang = { viewModel.updateSourceLanguage(it) },
             onUpdateTargetLang = { viewModel.updateTargetLanguage(it) },
-            onUpdateMode = { viewModel.setTranslationMode(it) },
             onUpdateOpacity = { viewModel.updateOverlayOpacity(it) },
             onUpdateFontSize = { viewModel.updateOverlayFontSize(it) },
             onUpdateBubbleStyle = { viewModel.updateBubbleStyle(it) },

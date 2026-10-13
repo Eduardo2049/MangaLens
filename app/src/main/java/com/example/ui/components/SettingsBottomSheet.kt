@@ -50,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.UserPreferences
 import com.example.data.model.SupportedLanguage
-import com.example.data.model.TranslationMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,7 +59,6 @@ fun SettingsBottomSheet(
     onDismiss: () -> Unit,
     onUpdateSourceLang: (SupportedLanguage) -> Unit,
     onUpdateTargetLang: (SupportedLanguage) -> Unit,
-    onUpdateMode: (TranslationMode) -> Unit,
     onUpdateOpacity: (Float) -> Unit,
     onUpdateFontSize: (Int) -> Unit,
     onUpdateBubbleStyle: (String) -> Unit,
@@ -101,46 +99,7 @@ fun SettingsBottomSheet(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.padding(bottom = 24.dp)
             ) {
-                // Section 1: Translation Mode
-                item {
-                    SettingsSectionTitle("Modo de Tradução")
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TranslationMode.entries.forEach { mode ->
-                            val isSelected = userPreferences.translationMode == mode
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) Color(0xFF4338CA) else Color(0xFF1E293B),
-                                border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF818CF8)) else null,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onUpdateMode(mode) }
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp)
-                                ) {
-                                    Text(
-                                        text = mode.title,
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = mode.description,
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 10.sp,
-                                        lineHeight = 12.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Section 2: Opacity Slider
+                // Opacity Slider
                 item {
                     SettingsSectionTitle("Opacidade do Balão Traduzido")
                     Row(

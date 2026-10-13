@@ -34,7 +34,6 @@ import com.example.MainActivity
 import com.example.data.local.UserPreferences
 import com.example.data.local.UserPreferencesRepository
 import com.example.data.model.TextOverlay
-import com.example.data.model.TranslationMode
 import com.example.data.remote.GeminiVisualTranslator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +44,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.security.MessageDigest
-import kotlin.time.Duration.Companion.seconds
 
 class MangaOverlayService : Service() {
 
@@ -65,7 +63,10 @@ class MangaOverlayService : Service() {
     private var isTranslatedOnScreen = false
 
     private var lastTranslatedBitmapHash: String? = null
-    private var lastAttemptedBitmapHash: String? = null
+    private var stableFrameHash: String? = null
+    private var stableFrameSinceMillis = 0L
+    private var lastRequestedFrameHash: String? = null
+    private var lastRequestFinishedMillis = 0L
     private var dynamicTranslateJob: Job? = null
     private var floatingLabel: TextView? = null
 
@@ -85,16 +86,6 @@ class MangaOverlayService : Service() {
         startForegroundServiceNotification()
         setupFloatingOverlay()
 
-        serviceScope.launch {
-            prefsRepo.preferences.collect { prefs ->
-                val label = floatingLabel ?: return@collect
-                if (prefs.translationMode != TranslationMode.DYNAMIC && dynamicTranslateJob?.isActive == true) {
-                    stopDynamicMode(label)
-                    label.text = "TRADUZIR TELA"
-                    label.setTextColor(Color.WHITE)
-                }
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -108,6 +99,7 @@ class MangaOverlayService : Service() {
 
         if (resultCode != -1 && resultData != null) {
             screenCaptureManager?.setup(resultCode, resultData)
+            floatingLabel?.let { startDynamicMode(it) }
         }
 
         return START_STICKY
@@ -202,23 +194,6 @@ class MangaOverlayService : Service() {
         }
         floatingLabel = label
 
-        val btnClear = TextView(this).apply {
-            text = " ✕ LIMPAR "
-            setTextColor("#F43F5E".toColorInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            background = GradientDrawable().apply {
-                cornerRadius = 20f
-                setColor("#331822".toColorInt())
-            }
-            setPadding(16, 8, 16, 8)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { leftMargin = 20 }
-            setOnClickListener { clearScreenTranslations(label) }
-        }
-
         val btnExit = TextView(this).apply {
             text = " ✖ "
             setTextColor("#94A3B8".toColorInt())
@@ -238,7 +213,6 @@ class MangaOverlayService : Service() {
 
         bubbleView.addView(lensIcon)
         bubbleView.addView(label)
-        bubbleView.addView(btnClear)
         bubbleView.addView(btnExit)
         bubbleContainer?.addView(bubbleView)
 
@@ -284,16 +258,7 @@ class MangaOverlayService : Service() {
     }
 
     private fun toggleScreenTranslation(statusLabel: TextView) {
-        val userPrefs = prefsRepo.preferences.value
-        if (userPrefs.translationMode == TranslationMode.DYNAMIC) {
-            if (dynamicTranslateJob?.isActive == true) stopDynamicMode(statusLabel) else startDynamicMode(statusLabel)
-            return
-        }
-        if (isTranslatedOnScreen) {
-            clearScreenTranslations(statusLabel)
-            return
-        }
-        translateCurrentFrame(statusLabel, userPrefs, forceRefresh = true)
+        if (dynamicTranslateJob?.isActive == true) stopDynamicMode(statusLabel) else startDynamicMode(statusLabel)
     }
 
     private fun translateCurrentFrame(statusLabel: TextView, userPrefs: UserPreferences, forceRefresh: Boolean) {
@@ -352,26 +317,42 @@ class MangaOverlayService : Service() {
                 statusLabel.setTextColor("#34D399".toColorInt())
             }
             while (true) {
-                delay(1.seconds)
+                delay(500)
                 val currentPrefs = prefsRepo.preferences.value
-                if (currentPrefs.translationMode != TranslationMode.DYNAMIC) {
-                    Log.d("MangaLens", "Auto: Parando modo dinâmico (modo alterado)")
-                    withContext(Dispatchers.Main) { stopDynamicMode(statusLabel) }
-                    break
-                }
+                if (!currentPrefs.isTranslationEnabled) continue
 
                 val bitmap = screenCaptureManager?.captureBitmap() ?: run {
                     Log.w("MangaLens", "Auto: Bitmap nulo na captura")
                     continue
                 }
                 val currentHash = computeBitmapHash(bitmap)
+                val now = System.currentTimeMillis()
 
-                if (currentHash == lastAttemptedBitmapHash) {
+                if (currentHash != stableFrameHash) {
+                    stableFrameHash = currentHash
+                    stableFrameSinceMillis = now
+                    lastRequestedFrameHash = null
+                    withContext(Dispatchers.Main) {
+                        clearScreenTranslations()
+                        statusLabel.text = "AGUARDANDO..."
+                        statusLabel.setTextColor("#F59E0B".toColorInt())
+                    }
                     bitmap.recycle()
                     continue
                 }
-                Log.d("MangaLens", "Auto: Nova tela detectada, enviando...")
-                lastAttemptedBitmapHash = currentHash
+
+                if (now - stableFrameSinceMillis < 2_000) {
+                    bitmap.recycle()
+                    continue
+                }
+
+                if (currentHash == lastRequestedFrameHash && now - lastRequestFinishedMillis < 5_000) {
+                    bitmap.recycle()
+                    continue
+                }
+
+                Log.d("MangaLens", "Auto: Tela estável por 2s, enviando tradução...")
+                lastRequestedFrameHash = currentHash
 
                 val result = visualTranslator.translateMangaImage(bitmap, currentPrefs.sourceLanguage, currentPrefs.targetLanguage)
                 bitmap.recycle()
@@ -386,10 +367,14 @@ class MangaOverlayService : Service() {
                         statusLabel.setTextColor("#34D399".toColorInt())
                     }.onFailure { error ->
                         Log.e("MangaLens", "Auto: Erro: ${error.message}")
-                        // Reset hash so it can try again on next cycle if it was a transient error
-                        lastAttemptedBitmapHash = null 
+                        lastRequestFinishedMillis = System.currentTimeMillis()
                         statusLabel.text = "ERRO ●"
                         statusLabel.setTextColor("#F43F5E".toColorInt())
+                        Toast.makeText(
+                            this@MangaOverlayService,
+                            error.localizedMessage ?: "Falha na tradução",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
                 }
             }
@@ -399,7 +384,10 @@ class MangaOverlayService : Service() {
     private fun stopDynamicMode(statusLabel: TextView) {
         dynamicTranslateJob?.cancel()
         dynamicTranslateJob = null
-        lastAttemptedBitmapHash = null
+        stableFrameHash = null
+        stableFrameSinceMillis = 0L
+        lastRequestedFrameHash = null
+        lastRequestFinishedMillis = 0L
         clearScreenTranslations(statusLabel)
         statusLabel.text = "AUTO ○"
         statusLabel.setTextColor("#94A3B8".toColorInt())

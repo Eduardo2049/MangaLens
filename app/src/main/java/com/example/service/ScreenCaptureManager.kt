@@ -16,7 +16,6 @@ import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import androidx.core.graphics.createBitmap
-import androidx.core.graphics.toColorInt
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.milliseconds
@@ -111,7 +110,7 @@ class ScreenCaptureManager(private val context: Context) {
      * Captures the latest frame from the buffer.
      * Uses coroutine-friendly delay if frame is not yet available.
      */
-    suspend fun captureBitmap(): Bitmap {
+    suspend fun captureBitmap(): Bitmap? {
         var snap = latestCapturedBitmap.get()
         
         if (snap == null || snap.isRecycled) {
@@ -128,18 +127,9 @@ class ScreenCaptureManager(private val context: Context) {
             Log.d("MangaLens", "Capture: OK (${snap.width}x${snap.height})")
             Bitmap.createBitmap(snap)
         } else {
-            Log.w("MangaLens", "Capture: Falha total após retentativas, usando fallback")
-            createFallbackBitmap()
+            Log.w("MangaLens", "Capture: Falha total após retentativas")
+            null
         }
-    }
-
-    private fun createFallbackBitmap(): Bitmap {
-        val width = if (screenWidth > 0) screenWidth else 1080
-        val height = if (screenHeight > 0) screenHeight else 2400
-        val fallbackBitmap = createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = android.graphics.Canvas(fallbackBitmap)
-        canvas.drawColor("#111827".toColorInt())
-        return fallbackBitmap
     }
 
     fun stop() {

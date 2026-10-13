@@ -1,3 +1,5 @@
 {
-    "java.configuration.updateBuildConfiguration": "interactive"
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.jdt.ls.java.home": "${env:JAVA_HOME}",
+    "java.import.gradle.java.home": "${env:JAVA_HOME}"
 }

@@ -19,28 +19,8 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
- * Visual translation client powered by the Gemini REST API.
- *
- * ⚠️  SECURITY NOTE — API key embedded in the client APK
- * ─────────────────────────────────────────────────────────────────────
- * `GEMINI_API_KEY` is baked into the APK at build time via [BuildConfig]. For personal use
- * this is fine, but any determined person can extract it by decompiling the APK with apktool.
- *
- * Recommended mitigations (pick at least option 1):
- *
- * 1. **Restrict the key in Google Cloud Console** (easy, do this now):
- *    console.cloud.google.com → APIs & Services → Credentials → your key →
- *    "Application restrictions" → Android apps → add your package name +
- *    the SHA-1 fingerprint of your signing certificate.
- *    The key will then only accept requests that originate from your signed APK.
- *    Get the fingerprint: `./gradlew signingReport`
- *
- * 2. **Server-side proxy** (complete solution, more effort):
- *    Move the key to a backend (e.g. Cloud Run / Firebase Functions).
- *    The app calls your backend which calls Gemini — the key never reaches the device.
- *
- * 3. **Firebase App Check** (already partially configured in this project):
- *    Combine with option 1 or 2 to prevent non-app clients from abusing your endpoint.
+ * Visual translation client backed by the MangaLens translation API.
+ * The Gemini API key remains on the backend and is never packaged in the APK.
  */
 class GeminiVisualTranslator {
 
@@ -55,92 +35,39 @@ class GeminiVisualTranslator {
         sourceLang: SupportedLanguage,
         targetLang: SupportedLanguage
     ): Result<List<TextOverlay>> = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        val hasValidApiKey = apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY"
-
-        if (!hasValidApiKey) {
-            Log.e("GeminiTranslator", "API key is missing or is still the placeholder value.")
+        val apiBaseUrl = BuildConfig.TRANSLATION_API_BASE_URL.trim().trimEnd('/')
+        if (apiBaseUrl.isBlank() || apiBaseUrl == "MY_TRANSLATION_API_BASE_URL") {
+            Log.e("GeminiTranslator", "Translation backend URL is not configured.")
             return@withContext Result.failure(
-                IllegalStateException("Gemini API key not configured. Set GEMINI_API_KEY in local.properties.")
+                IllegalStateException("Translation backend URL is not configured.")
             )
         }
 
         try {
             Log.d("MangaLens", "API: Iniciando tradução...")
-            val base64Image = bitmapToBase64(bitmap)
-            val promptText = buildPrompt(sourceLang, targetLang)
-
             val requestJson = JSONObject().apply {
-                val contentsArray = JSONArray().apply {
-                    val partsArray = JSONArray().apply {
-                        put(JSONObject().put("text", promptText))
-                        put(JSONObject().put("inlineData", JSONObject().apply {
-                            put("mimeType", "image/jpeg")
-                            put("data", base64Image)
-                        }))
-                    }
-                    put(JSONObject().put("parts", partsArray))
-                }
-                put("contents", contentsArray)
-
-                val genConfig = JSONObject().apply {
-                    put("responseMimeType", "application/json")
-                    put("temperature", 0.2)
-                }
-                put("generationConfig", genConfig)
+                put("imageBase64", bitmapToBase64(bitmap))
+                put("sourceLanguage", sourceLang.code)
+                put("targetLanguage", targetLang.code)
             }
-
-            val requestUrl = "https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=$apiKey"
-
-            val body = requestJson.toString().toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
-                .url(requestUrl)
-                .post(body)
+                .url("$apiBaseUrl/v1/translate")
+                .post(requestJson.toString().toRequestBody("application/json".toMediaType()))
                 .build()
-
             val response = client.newCall(request).execute()
-            val responseBodyString = response.body?.string() ?: ""
-            Log.d("MangaLens", "API: Resposta recebida (Código: ${response.code})")
+            val responseBodyString = response.use { it.body?.string() ?: "" }
 
             if (!response.isSuccessful) {
-                Log.e("MangaLens", "API: Erro HTTP ${response.code}: $responseBodyString")
                 return@withContext Result.failure(
-                    Exception("Gemini API returned HTTP ${response.code}. Check your API key and quota.")
+                    Exception("Translation backend returned HTTP ${response.code}: ${extractApiError(responseBodyString)}")
                 )
             }
 
-            val jsonResponse = JSONObject(responseBodyString)
-            val candidates = jsonResponse.optJSONArray("candidates")
-
-            if (candidates == null || candidates.length() == 0) {
-                Log.e("GeminiTranslator", "No candidates in response: $responseBodyString")
-                return@withContext Result.failure(
-                    Exception("Gemini returned no candidates. The image may have been blocked by safety filters.")
-                )
-            }
-
-            val content = candidates.getJSONObject(0).optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
-            val rawText = parts?.optJSONObject(0)?.optString("text") ?: ""
-
-            if (rawText.isBlank()) {
-                Log.e("GeminiTranslator", "Gemini returned empty text content.")
-                return@withContext Result.failure(
-                    Exception("Gemini returned an empty response. The model may not have found any text.")
-                )
-            }
-
-            val textOverlays = parseOverlaysFromJson(rawText)
-
+            val textOverlays = parseOverlaysFromJson(responseBodyString)
             if (textOverlays.isEmpty()) {
-                Log.w("GeminiTranslator", "Parsed 0 overlays from response: $rawText")
-                return@withContext Result.failure(
-                    Exception("No text regions found in the image. Try on a page with visible speech bubbles.")
-                )
+                return@withContext Result.failure(Exception("No text regions found in the image."))
             }
-
             Result.success(textOverlays)
-
         } catch (e: Exception) {
             Log.e("GeminiTranslator", "Translation request failed", e)
             Result.failure(Exception("Translation failed: ${e.message}", e))
@@ -207,15 +134,11 @@ class GeminiVisualTranslator {
         """.trimIndent()
     }
 
-    private fun parseOverlaysFromJson(jsonString: String): List<TextOverlay> {
+    internal fun parseOverlaysFromJson(jsonString: String): List<TextOverlay> {
         val list = mutableListOf<TextOverlay>()
         try {
             // Remove markdown formatting if present
-            val cleanJson = jsonString.trim()
-                .removePrefix("```json")
-                .removePrefix("```")
-                .removeSuffix("```")
-                .trim()
+            val cleanJson = extractJsonPayload(jsonString)
 
             val jsonArray = when {
                 cleanJson.startsWith("[") -> JSONArray(cleanJson)
@@ -236,8 +159,8 @@ class GeminiVisualTranslator {
                     // Gemini 2.0+ usually follows 0-100 percentage range for bounding boxes
                     val yMin = item.optDouble("yMin", 0.0).toFloat().coerceIn(0f, 100f)
                     val xMin = item.optDouble("xMin", 0.0).toFloat().coerceIn(0f, 100f)
-                    val yMax = item.optDouble("yMax", yMin + 10.0).toFloat().coerceIn(0f, 100f)
-                    val xMax = item.optDouble("xMax", xMin + 15.0).toFloat().coerceIn(0f, 100f)
+                    val yMax = item.optDouble("yMax", yMin + 10.0).toFloat().coerceIn(yMin, 100f)
+                    val xMax = item.optDouble("xMax", xMin + 15.0).toFloat().coerceIn(xMin, 100f)
                     val isVertical = item.optBoolean("isVertical", false)
                     val bubbleType = item.optString("bubbleType", "SPEECH")
 
@@ -256,5 +179,40 @@ class GeminiVisualTranslator {
             Log.e("GeminiTranslator", "Error parsing overlay JSON: ${e.message}", e)
         }
         return list
+    }
+
+    private fun extractJsonPayload(rawText: String): String {
+        val withoutFence = rawText.trim()
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+
+        if (withoutFence.startsWith("[") || withoutFence.startsWith("{")) {
+            return withoutFence
+        }
+
+        val arrayStart = withoutFence.indexOf('[')
+        val arrayEnd = withoutFence.lastIndexOf(']')
+        if (arrayStart >= 0 && arrayEnd > arrayStart) {
+            return withoutFence.substring(arrayStart, arrayEnd + 1)
+        }
+
+        val objectStart = withoutFence.indexOf('{')
+        val objectEnd = withoutFence.lastIndexOf('}')
+        return if (objectStart >= 0 && objectEnd > objectStart) {
+            withoutFence.substring(objectStart, objectEnd + 1)
+        } else {
+            withoutFence
+        }
+    }
+
+    private fun extractApiError(responseBody: String): String {
+        return runCatching {
+            val response = JSONObject(responseBody)
+            val message = response.optString("error", "Unknown backend error")
+            val requestId = response.optString("requestId")
+            if (requestId.isBlank()) message else "$message (requestId=$requestId)"
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Check your API key, model access, and quota."
     }
 }

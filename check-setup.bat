@@ -15,14 +15,19 @@ if %errorlevel% neq 0 (
     )
 )
 
-:: 2. Verificando .env
+:: 2. Verificando configuracao do backend
 echo.
-echo [2/3] Verificando arquivo .env...
-if not exist ".env" (
-    echo [AVISO] Arquivo .env nao encontrado.
-    echo         Copie o .env.example para .env e adicione sua GEMINI_API_KEY.
+echo [2/3] Verificando backend\.env...
+if not exist "backend\.env" (
+    echo [AVISO] backend\.env nao encontrado.
+    echo         Copie backend\.env.example para backend\.env e adicione sua GEMINI_API_KEY.
 ) else (
-    echo Arquivo .env presente.
+    echo backend\.env presente.
+)
+if not exist "backend\package.json" (
+    echo [ERRO] backend\package.json nao encontrado.
+) else (
+    echo Backend Node.js detectado.
 )
 
 :: 3. Verificando Variaveis de Ambiente do Android

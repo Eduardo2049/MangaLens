@@ -5,7 +5,6 @@ plugins {
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
 
@@ -21,6 +20,10 @@ android {
     targetSdk = 35
     versionCode = 8
     versionName = "0.8"
+    val translationApiBaseUrl = providers.gradleProperty("TRANSLATION_API_BASE_URL")
+      .orElse("http://10.0.2.2:8080")
+      .get()
+    buildConfigField("String", "TRANSLATION_API_BASE_URL", "\"$translationApiBaseUrl\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -56,13 +59,6 @@ android {
 
   // Reverted to standard APK name to ensure build stability on AGP 9.1.1
   // Use the default app-debug.apk location
-}
-
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
