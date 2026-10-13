@@ -1,280 +1,285 @@
-<div align="center">
+# MangaLens
 
-# 🔍 MangaLens
+Tradutor visual de mangás para Android. O app captura a tela com `MediaProjection`, envia novos frames ao backend MangaLens e desenha a tradução sobre o leitor atual.
 
-**Tradutor visual de mangá em tempo real para Android**
+## Arquitetura
 
-*Leia qualquer mangá em qualquer leitor, com tradução sobreposta direto na tela — powered by Gemini AI*
-
-![MangaLens](https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
-![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Latest-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)
-![Gemini](https://img.shields.io/badge/Gemini%202.5%20Flash-API-8E75B2?style=flat-square&logo=google&logoColor=white)
-![CI](https://img.shields.io/github/actions/workflow/status/Eduardo2049/MangaLens/build.yml?style=flat-square&label=CI%20build)
-![License](https://img.shields.io/badge/Licença-MIT-22C55E?style=flat-square)
-
-</div>
-
----
-
-## O que é
-
-MangaLens é um aplicativo Android que funciona como uma **lupa de tradução flutuante**, similar ao Google Lens, mas especializado em mangás, manhwas e webtoons. Ele se sobrepõe a qualquer leitor (Tachiyomi, Mihon, Komikku, Kotatsu, etc.) e traduz o texto dos balões diretamente na tela, sem tirar você do contexto.
-
-### Como funciona
-
-```
-Você lê no app leitor favorito
-          ↓
-MangaLens captura a tela via MediaProjection
-          ↓
-Screenshot é enviado para o Gemini 2.5 Flash
-          ↓
-Gemini retorna texto original + tradução + posição dos balões (bounding boxes)
-          ↓
-MangaLens desenha cards brancos sobrepostos exatamente sobre cada balão
-          ↓
-Toque em qualquer card para copiar o texto traduzido
+```text
+Leitor Android
+    |
+    | captura de tela + idioma de origem/destino
+    v
+Backend MangaLens (/v1/translate)
+    |
+    | GEMINI_API_KEY somente no servidor
+    v
+Gemini 3.8 Flash
 ```
 
----
+O nome exato do modelo interno usado pelo Google Lens não é público. O backend usa o modelo multimodal público estável `gemini-3.8-flash`.
 
-## Funcionalidades
+## Fluxo do aplicativo
 
-| Feature | Descrição |
-|---|---|
-| 🔍 **OCR + Tradução** | Detecta e traduz texto em japonês, coreano, chinês e inglês usando Gemini Vision |
-| 🪟 **Overlay flutuante** | Funciona sobre qualquer app de leitura — não precisa importar o mangá |
-| ⚡ **Modo Manual** | Traduz a tela atual com um único toque no botão flutuante |
-| 🔄 **Modo Dinâmico** | Monitora mudanças na tela automaticamente e traduz ao trocar de página |
-| 🧠 **Cache inteligente** | Evita chamadas redundantes à API comparando hash do frame antes de traduzir |
-| 📋 **Copiar texto** | Toque em qualquer overlay para copiar a tradução para a área de transferência |
-| 📚 **Histórico** | Armazena as últimas traduções localmente via Room |
-| ⚙️ **Configurável** | Idioma de origem, idioma alvo, opacidade, tamanho da fonte e estilo dos overlays |
+1. Toque em **Ativar tradução automática**.
+2. Conceda as permissões de sobreposição e captura de tela.
+3. Escolha o idioma de destino em Configurações.
+4. Abra Mihon, Tachiyomi, Komikku, Kotatsu ou outro leitor.
+5. O serviço detecta mudanças na tela e traduz automaticamente.
+6. Toque em um overlay para copiar o texto traduzido.
 
----
-
-## Modos de Tradução
-
-### Manual (`TRADUZIR TELA`)
-Abra seu leitor, navegue até a página desejada e toque no botão flutuante. MangaLens captura a tela atual, envia para o Gemini e posiciona os overlays sobre os balões. Toque novamente em `OCULTAR TRADUÇÃO` para esconder.
-
-### Dinâmico (`AUTO ●`)
-Ative nas preferências `Modo → Dinâmico`. O botão muda para `AUTO ●`. MangaLens verifica a tela a cada 2 segundos — se a página mudou (detectado via hash MD5), a tradução dispara automaticamente. Toque novamente para pausar (`AUTO ○`).
-
----
+O botão principal funciona como um interruptor: ao desativar, o serviço e os overlays são removidos.
 
 ## Requisitos
 
-- Android **7.0 (API 24)** ou superior
-- Permissão de **sobreposição de janelas** (`SYSTEM_ALERT_WINDOW`)
-- Permissão de **captura de tela** (solicitada ao iniciar)
-- Chave de API do **Google Gemini** (gratuita no Google AI Studio)
+- JDK 17 completo.
+- Android SDK 35.
+- Android 7.0 / API 24 ou superior.
+- Node.js 18 ou superior para o backend local.
+- Celular e computador na mesma rede quando usar um aparelho físico.
 
----
+## Corrigir o JDK no VS Code
 
-## Instalação
+O Gradle 9.3.1 e o Android Gradle Plugin deste projeto exigem Java 17 ou superior. Se o console informar que está usando JVM 8, feche todas as janelas do VS Code e abra uma nova a partir do PowerShell com o JDK correto:
 
-### Opção A — Compilar do código-fonte
-
-**Pré-requisitos:** Android Studio Ladybug+, JDK 17+, Android SDK 36
-
-```bash
-# 1. Clone o repositório
-git clone https://github.com/Eduardo2049/MangaLens.git
-cd MangaLens
-
-# 2. Configure sua chave Gemini (veja a seção abaixo)
-# No Linux/macOS:
-echo "GEMINI_API_KEY=SUA_CHAVE_AQUI" > .env
-# No Windows (PowerShell):
-echo "GEMINI_API_KEY=SUA_CHAVE_AQUI" | Out-File -Encoding ascii .env
-
-# 3. Compile e instale via Android Studio
-#    ou via linha de comando (Linux/macOS):
-./gradlew installDebug
-
-#    Windows (PowerShell):
-.\gradlew.bat installDebug
+```powershell
+$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
+code .
 ```
 
-### Opção B — Instalar APK diretamente
+Confirme no terminal integrado:
 
-Baixe a versão desejada na seção [Releases](https://github.com/Eduardo2049/MangaLens/releases):
-
-| Variante | Arquivo | Quando usar |
-|---|---|---|
-| **Debug** | `app-debug.apk` | Desenvolvimento e testes — logs habilitados, sem ofuscação |
-| **Release** | `app-release.apk` | Uso diário — otimizado, sem logs de depuração |
-
-> **⚠️ Atenção:** Para instalar APKs de fontes externas, ative **Fontes desconhecidas** nas configurações do Android:
-> `Configurações → Aplicativos → Instalar apps de fontes desconhecidas`
-
-**Instalar via ADB (cabo USB):**
-```bash
-# Conecte o dispositivo com depuração USB ativada, então:
-adb install app-debug.apk
-
-# Para substituir uma versão já instalada:
-adb install -r app-debug.apk
+```powershell
+java -version
+.\gradlew.bat --version
 ```
 
----
+Os dois comandos devem mostrar Java 17. Depois execute `Developer: Reload Window` no VS Code. Se o aviso "build file has been changed" continuar, execute `Java: Clean Java Language Server Workspace` e reabra o projeto.
 
-## Configuração da chave Gemini
+O arquivo `.vscode/settings.json` usa `${env:JAVA_HOME}` para que o projeto não dependa de um caminho absoluto de outra máquina.
 
-O app usa a API Gemini para OCR e tradução. A chave é **gratuita** com cota generosa para uso pessoal.
+## Testar no computador
 
-### 1. Obter a chave
+### 1. Testar o backend
 
-Acesse [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) → **Create API key** → copie a chave (começa com `AIza...`).
+Em um terminal PowerShell:
 
-### 2. Adicionar ao projeto
-
-Crie o arquivo `.env` na **raiz do projeto** (mesmo nível de `settings.gradle.kts`):
-
-```properties
-GEMINI_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```powershell
+cd backend
+Copy-Item .env.example .env
+# Edite .env e informe GEMINI_API_KEY
+npm test
+npm start
 ```
 
-> O `.env` já está no `.gitignore`. Nunca commite sua chave real.
-> Copie `.env.example` como ponto de partida: `cp .env.example .env`
+Em outro terminal, confirme que o servidor está vivo:
 
-### 3. Restringir a chave (recomendado)
-
-Para que a chave só funcione originada do seu APK assinado:
-
-1. Acesse [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
-2. Clique na sua chave → **Edit API key** → **Application restrictions** → **Android apps**
-3. Adicione o item:
-   - **Package name:** `com.aistudio.mangalens.trvis`
-   - **SHA-1 certificate fingerprint:** execute `./gradlew signingReport` e copie o SHA-1
-4. Salve
-
----
-
-## Como usar
-
-1. **Abra o MangaLens** e conceda as permissões solicitadas (sobreposição e captura de tela)
-2. **Inicie o serviço** tocando em "Iniciar Overlay" — um botão flutuante aparece na tela
-3. **Abra seu leitor** preferido (Tachiyomi, Mihon, Komikku, etc.)
-4. Navegue até uma página com texto
-5. **Toque no botão flutuante** para traduzir (modo Manual) ou deixe o app detectar automaticamente (modo Dinâmico)
-6. Toque em qualquer overlay para **copiar** a tradução
-
----
-
-## Estrutura do projeto
-
-```
-MangaLens/
-├── .github/
-│   └── workflows/
-│       └── build.yml       # CI/CD: build + publicação de APK no GitHub Releases
-├── app/src/main/java/com/example/
-│   ├── data/
-│   │   ├── local/          # Room DB (histórico) + SharedPreferences (configurações)
-│   │   ├── model/          # Modelos de dados: TextOverlay, BoundingBox, SupportedLanguage
-│   │   ├── remote/         # GeminiVisualTranslator — cliente REST da API Gemini
-│   │   └── samples/        # Dados de exemplo para o leitor interno de demonstração
-│   ├── service/
-│   │   └── MangaOverlayService.kt  # Serviço foreground: captura de tela + overlay
-│   ├── ui/
-│   │   ├── reader/         # Leitor interno com ViewModel e Compose UI
-│   │   ├── components/     # Componentes reutilizáveis de UI
-│   │   └── theme/          # Tema dark mode e paleta de cores
-│   └── MainActivity.kt
-├── gradlew / gradlew.bat   # Gradle Wrapper (Linux/macOS e Windows)
-└── .env.example            # Template — copie para .env e substitua pela sua chave
+```powershell
+Invoke-RestMethod http://localhost:8080/health
 ```
 
----
+O resultado esperado contém `ok: true`. A chamada real de tradução exige uma key válida e uma imagem; os testes automatizados usam uma resposta simulada.
 
-## Tecnologias
+Enquanto o backend estiver rodando, cada chamada produz um log semelhante a:
 
-| Camada | Tecnologia |
-|---|---|
-| Linguagem | Kotlin 2.0 |
-| UI | Jetpack Compose + Material 3 |
-| Overlay | `WindowManager` + `MediaProjection` |
-| AI / OCR | Gemini 2.5 Flash (via REST) |
-| Banco de dados | Room |
-| Preferências | SharedPreferences |
-| Imagens | Coil |
-| HTTP | OkHttp 4 |
-| Async | Kotlin Coroutines |
-| Segredos de build | Secrets Gradle Plugin |
-| CI/CD | GitHub Actions |
-
----
-
-## Idiomas suportados
-
-| Idioma de origem | Suportado |
-|---|---|
-| 🌐 Detectar automaticamente | ✅ |
-| 🇯🇵 Japonês (vertical e horizontal) | ✅ |
-| 🇰🇷 Coreano | ✅ |
-| 🇨🇳 Chinês simplificado / tradicional | ✅ |
-| 🇺🇸 Inglês | ✅ |
-
-| Idioma de destino | Suportado |
-|---|---|
-| 🇧🇷 Português (Brasil) | ✅ |
-| 🇺🇸 Inglês | ✅ |
-| 🇪🇸 Espanhol | ✅ |
-| 🇯🇵 Japonês | ✅ |
-| 🇰🇷 Coreano | ✅ |
-| 🇨🇳 Chinês | ✅ |
-
----
-
-## CI/CD — GitHub Actions
-
-O repositório inclui um workflow (`.github/workflows/build.yml`) que automatiza o build:
-
-| Trigger | O que acontece |
-|---|---|
-| Pull request | Build debug APK — resultado disponível como artifact na aba Actions |
-| Push em qualquer branch | Idem |
-| Tag `v*` (ex.: `v1.0.0`) | Build debug **e** release + cria GitHub Release com os dois APKs |
-
-### Configurar o secret da chave Gemini no repositório
-
-1. Acesse **Settings → Secrets and variables → Actions → New repository secret**
-2. Nome: `GEMINI_API_KEY` | Valor: sua chave real
-
-O workflow injeta o secret no `.env` automaticamente a cada build.
-
-### Publicar uma nova versão
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-# O GitHub Actions builda e publica o Release automaticamente
+```text
+[request-id] POST /v1/translate -> 200 (1850ms) overlays=3
 ```
 
----
+Em caso de erro, o backend registra a stack trace com o mesmo `request-id` e devolve esse identificador ao Android. Assim, o texto exibido no app pode ser relacionado diretamente ao erro no terminal. Não são registrados a chave Gemini nem o conteúdo da imagem.
+
+Se aparecer `EADDRINUSE ... 8080`, já existe um backend rodando. Use-o, consulte `/health` ou encerre o processo anterior antes de executar `npm start` novamente.
+
+### 2. Testar o Android no emulador
+
+Com o backend rodando, confirme que existe um emulador Android iniciado e conectado:
+
+```powershell
+adb devices
+```
+
+Se `adb` não for reconhecido, configure o Android SDK nesta sessão do PowerShell:
+
+```powershell
+$env:ANDROID_HOME="C:\Users\eduardo.asousa\AppData\Local\Android\Sdk"
+$env:Path="$env:ANDROID_HOME\platform-tools;$env:ANDROID_HOME\emulator;$env:Path"
+adb version
+```
+
+Para manter essa configuração em novas sessões, adicione `platform-tools` às variáveis de ambiente do Windows ou abra o terminal pelo Android Studio.
+
+Gere e instale o APK apontando para o host do emulador:
+
+```powershell
+$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://10.0.2.2:8080
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+No app:
+
+1. Toque em **Ativar tradução automática**.
+2. Conceda **Exibir sobre outros apps**.
+3. Autorize a captura de tela.
+4. Abra uma página de mangá com texto dentro do emulador.
+5. Aguarde a captura automática e confirme os overlays traduzidos.
+6. Toque em um overlay e confirme que o texto é copiado.
+7. Toque novamente no botão principal e confirme que o serviço e os overlays desaparecem.
+
+### 3. Observar logs
+
+Para investigar falhas de conexão ou permissão:
+
+```powershell
+adb logcat -c
+adb logcat | Select-String "MangaLens|GeminiTranslator|AndroidRuntime"
+```
+
+Mensagens `HTTP 400` ou `HTTP 502` normalmente indicam configuração do backend, key ou cota. Mensagens de permissão indicam que a captura ou a sobreposição ainda não foi autorizada.
+
+### 4. Testar em celular físico
+
+Use o IPv4 do computador na mesma rede Wi-Fi do celular e gere outro APK:
+
+```powershell
+ipconfig
+$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://192.168.1.100:8080
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+Troque `192.168.1.100` pelo IPv4 correto. Libere a porta TCP 8080 no firewall do Windows se o endpoint `/health` não puder ser acessado pelo celular.
+
+## Backend local
+
+O backend mantém a chave Gemini fora do APK.
+
+### Windows PowerShell
+
+```powershell
+cd backend
+Copy-Item .env.example .env
+# Edite backend/.env e substitua MY_GEMINI_API_KEY pela sua chave
+npm test
+npm start
+```
+
+Verifique o servidor em `http://localhost:8080/health`.
+
+Crie a chave em [Google AI Studio](https://aistudio.google.com/apikey). Nunca coloque essa chave em arquivos do Android ou no APK.
+
+### Emulador Android
+
+O valor padrão do Android é `http://10.0.2.2:8080`. Esse endereço aponta para o computador host a partir do emulador.
+
+### Celular físico
+
+1. Execute `ipconfig` e copie o IPv4 do computador.
+2. Inicie o backend com `npm start`.
+3. Libere a porta TCP 8080 no firewall, se necessário.
+4. Gere o APK apontando para o IPv4:
+
+```powershell
+$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://192.168.1.100:8080
+```
+
+Troque `192.168.1.100` pelo endereço real do computador.
+
+## Gerar APK para testes
+
+### Windows PowerShell
+
+```powershell
+$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+.\gradlew.bat :app:testDebugUnitTest
+.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://10.0.2.2:8080
+```
+
+O arquivo será gerado em:
+
+`app/build/outputs/apk/debug/app-debug.apk`
+
+Para instalar em um dispositivo conectado:
+
+```powershell
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+Para instalar no emulador, mantenha o backend rodando em `localhost:8080`. Para um celular físico, gere novamente usando o IP da máquina.
+
+### Android Studio
+
+1. Abra o projeto.
+2. Configure o JDK 17.
+3. Execute `app > Tasks > build > assembleDebug`.
+4. Instale `app-debug.apk` no dispositivo.
+
+## Configurar outro backend
+
+Passe a URL no Gradle:
+
+```powershell
+.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=https://seu-backend.example.com
+```
+
+O backend precisa expor:
+
+- `GET /health`
+- `POST /v1/translate`
+
+O corpo de `POST /v1/translate` é:
+
+```json
+{
+  "imageBase64": "...",
+  "sourceLanguage": "ja",
+  "targetLanguage": "pt"
+}
+```
+
+A resposta esperada é:
+
+```json
+{
+  "overlays": [
+    {
+      "originalText": "...",
+      "translatedText": "...",
+      "yMin": 10,
+      "xMin": 20,
+      "yMax": 30,
+      "xMax": 80,
+      "isVertical": false,
+      "bubbleType": "SPEECH"
+    }
+  ]
+}
+```
+
+## Estrutura
+
+```text
+app/                         Aplicativo Android
+backend/src/server.js        Proxy HTTP para Gemini
+backend/test/                Testes do backend
+backend/.env.example         Configuração do backend sem segredo real
+```
+
+## CI/CD
+
+O workflow do GitHub Actions executa os testes e gera o APK debug como artifact. A chave Gemini não é necessária para compilar o Android; ela deve ser configurada somente no ambiente onde o backend for hospedado.
 
 ## Troubleshooting
 
-| Sintoma | Causa provável | Solução |
-|---|---|---|
-| Overlay não aparece após iniciar | Permissão de sobreposição não concedida | `Configurações → Aplicativos → MangaLens → Permissões → Exibir sobre outros apps` |
-| `ERRO NA API` no botão flutuante | Chave inválida ou cota esgotada | Verifique o `.env`, cheque a cota em [aistudio.google.com](https://aistudio.google.com) |
-| Tradução não sincroniza com o scroll | Modo manual não detecta mudança de página automaticamente | Ative o Modo Dinâmico nas preferências do app |
-| Balões traduzidos aparecem deslocados | Resolução de tela diverge do que a captura detectou | Reinicie o serviço — ele relê as dimensões ao iniciar |
-| `./gradlew` não reconhecido (Windows) | Shell não suporta prefixo `./` | Use `.\gradlew.bat installDebug` no PowerShell |
-| Build falha com erro de chave ausente | `GEMINI_API_KEY` não definida no `.env` | Copie `.env.example` para `.env` e substitua pelo valor real |
-
----
+| Problema | Solução |
+|---|---|
+| Backend não responde | Execute `npm start` em `backend/` e verifique `/health`. |
+| Emulador não conecta | Use `http://10.0.2.2:8080`. |
+| Celular não conecta | Use o IPv4 do computador e libere TCP 8080 no firewall. |
+| `ERRO NA API` | Confira o backend, a cota e `backend/.env`. |
+| APK não compila | Confirme JDK 17 e Android SDK 35. |
 
 ## Licença
 
-MIT — veja [LICENSE](LICENSE) para mais detalhes.
-
----
-
-<div align="center">
-Feito com ☕ e muito mangá
-</div>
+MIT. Consulte [LICENSE](LICENSE).

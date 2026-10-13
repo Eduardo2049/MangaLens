@@ -34,11 +34,15 @@ jobs:
       - name: Grant execute permission to gradlew
         run: chmod +x gradlew
 
-      # ── Gemini API key ───────────────────────────────────────────────────────
-      # Store your key as a repository secret named GEMINI_API_KEY:
-      # Settings → Secrets and variables → Actions → New repository secret
-      - name: Inject Gemini API key into .env
-        run: echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+      # ── Backend tests ───────────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test translation backend
+        working-directory: backend
+        run: npm test
 
       # ── Build Debug APK ──────────────────────────────────────────────────────
       - name: Build debug APK
@@ -84,7 +88,7 @@ jobs:
             ```
 
             ### Configuração obrigatória
-            Adicione sua chave Gemini no arquivo `.env` na raiz do projeto antes de compilar.
+            O APK chama o backend MangaLens. Configure `GEMINI_API_KEY` apenas no ambiente do backend.
             Veja o README para instruções completas.
           files: |
             app/build/outputs/apk/debug/app-debug.apk

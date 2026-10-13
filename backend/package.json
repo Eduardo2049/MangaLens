@@ -1,0 +1,13 @@
+{
+  "name": "mangalens-translation-backend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Backend proxy for MangaLens Gemini translation requests",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

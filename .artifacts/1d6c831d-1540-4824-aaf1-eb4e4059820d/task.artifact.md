@@ -1,0 +1,6 @@
+- `[x]` Update Gemini model to `gemini-3.5-flash` and API to `v1`
+- `[x]` Fix `VirtualDisplay` flags for better compatibility
+- `[x]` Improve `ImageReader` buffer logic (max 3 images)
+- `[x]` Use modern `WindowMetrics` for screen dimensions
+- `[x]` Add more aggressive retry for first frame capture
+- `[x]` Build and Install on device

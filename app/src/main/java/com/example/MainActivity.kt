@@ -18,6 +18,7 @@ import com.example.ui.theme.MyApplicationTheme
 class MainActivity : ComponentActivity() {
 
     private lateinit var mediaProjectionManager: MediaProjectionManager
+    private var screenCaptureResult: ((Boolean) -> Unit)? = null
 
     // Lança a permissão de captura de tela somente após garantir que o overlay já foi autorizado
     private val screenCaptureLauncher = registerForActivityResult(
@@ -34,9 +35,12 @@ class MainActivity : ComponentActivity() {
                 startService(intent)
             }
             Toast.makeText(this, "Bolha ativada com suporte a captura de tela!", Toast.LENGTH_SHORT).show()
+            screenCaptureResult?.invoke(true)
         } else {
             Toast.makeText(this, "Permissão de captura de tela necessária para tradução automática.", Toast.LENGTH_LONG).show()
+            screenCaptureResult?.invoke(false)
         }
+        screenCaptureResult = null
     }
 
     // Retorno da tela de configurações do overlay (Settings.ACTION_MANAGE_OVERLAY_PERMISSION).
@@ -52,6 +56,8 @@ class MainActivity : ComponentActivity() {
                 "Permissão de sobreposição negada. Habilite o Manga Lens nas configurações para usar o tradutor.",
                 Toast.LENGTH_LONG
             ).show()
+            screenCaptureResult?.invoke(false)
+            screenCaptureResult = null
         }
     }
 
@@ -62,7 +68,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme(darkTheme = true) {
                 MangaReaderScreen(
-                    onRequestScreenCapture = { requestScreenCaptureWithOverlayCheck() },
+                    onRequestScreenCapture = { onResult ->
+                        requestScreenCaptureWithOverlayCheck(onResult)
+                    },
                 )
             }
         }
@@ -73,7 +81,8 @@ class MainActivity : ComponentActivity() {
      * Em Android 10+ (API 29+) a permissão precisa ser concedida manualmente pelo usuário nas
      * configurações do sistema. Se já concedida, prossegue direto para a captura de tela.
      */
-    private fun requestScreenCaptureWithOverlayCheck() {
+    private fun requestScreenCaptureWithOverlayCheck(onResult: (Boolean) -> Unit) {
+        screenCaptureResult = onResult
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(
                 this,
