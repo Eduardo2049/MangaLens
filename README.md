@@ -1,33 +1,64 @@
+<div align="center">
+
 # MangaLens
 
-Tradutor visual de mangás para Android. O app captura a tela com `MediaProjection`, envia novos frames ao backend MangaLens e desenha a tradução sobre o leitor atual.
+**Tradutor visual de mangás em tempo real para Android**
 
-## Arquitetura
+*Traduza mangás, manhuas e webtoons diretamente sobre o leitor, sem sair da leitura — powered by Gemini AI*
+
+![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
+![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini%203.8%20Flash-API-8E75B2?style=flat-square&logo=google&logoColor=white)
+![License](https://img.shields.io/badge/Licença-MIT-22C55E?style=flat-square)
+
+</div>
+
+---
+
+## O que é
+
+MangaLens é uma **lupa de tradução flutuante** para mangás, manhuas e webtoons. O aplicativo funciona sobre leitores Android como Mihon, Tachiyomi, Komikku e Kotatsu, captura a tela via `MediaProjection` e desenha os overlays traduzidos sobre os balões.
+
+O app utiliza um backend próprio para proteger a `GEMINI_API_KEY`. A chave nunca é empacotada no APK.
+
+### Como funciona
 
 ```text
-Leitor Android
+Você lê no seu app favorito
     |
-    | captura de tela + idioma de origem/destino
+  | MangaLens captura a tela via MediaProjection
     v
-Backend MangaLens (/v1/translate)
+Backend MangaLens recebe a imagem e os idiomas
     |
-    | GEMINI_API_KEY somente no servidor
+  | A key permanece somente no servidor
     v
-Gemini 3.8 Flash
+Gemini 3.8 Flash analisa e traduz a imagem
+  |
+  v
+MangaLens posiciona os overlays sobre os balões
 ```
 
-O nome exato do modelo interno usado pelo Google Lens não é público. O backend usa o modelo multimodal público estável `gemini-3.8-flash`.
+O nome exato do modelo interno usado pelo Google Lens não é público. O projeto utiliza o modelo multimodal público estável `gemini-3.8-flash`.
 
-## Fluxo do aplicativo
+## Funcionalidades
 
-1. Toque em **Ativar tradução automática**.
-2. Conceda as permissões de sobreposição e captura de tela.
-3. Escolha o idioma de destino em Configurações.
-4. Abra Mihon, Tachiyomi, Komikku, Kotatsu ou outro leitor.
-5. O serviço detecta mudanças na tela e traduz automaticamente.
-6. Toque em um overlay para copiar o texto traduzido.
+| Feature | Descrição |
+|---|---|
+| 🔍 **OCR + tradução visual** | Detecta texto em balões, narrações, efeitos sonoros e blocos verticais. |
+| 🔄 **Tradução automática** | Um único botão ativa a captura e o monitoramento da tela. |
+| ⏱️ **Espera inteligente** | Aguarda a tela ficar parada por aproximadamente 2 segundos antes de traduzir. |
+| 🪟 **Overlay flutuante** | Funciona sobre o leitor atual sem importar o mangá. |
+| 🧠 **Cache de frames** | Evita reenviar a mesma tela repetidamente. |
+| 📋 **Copiar tradução** | Toque no overlay para copiar o texto traduzido. |
+| 📚 **Histórico local** | Armazena traduções recentes no dispositivo. |
+| 🔐 **Backend protegido** | A chave Gemini permanece fora do aplicativo Android. |
 
-O botão principal funciona como um interruptor: ao desativar, o serviço e os overlays são removidos.
+## Fluxo de ativação
+
+Toque em **Ativar tradução automática**, conceda as permissões de sobreposição e captura de tela e selecione o idioma de destino em Configurações. Ao abrir uma página, o MangaLens limpa os overlays antigos durante a rolagem e envia a nova tela somente quando ela permanece estável.
+
+O botão principal funciona como um interruptor: ao desativar, o serviço e todos os overlays são removidos.
 
 ## Requisitos
 
