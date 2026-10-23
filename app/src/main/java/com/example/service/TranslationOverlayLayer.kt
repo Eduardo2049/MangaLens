@@ -14,7 +14,6 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.FrameLayout
 import android.widget.TextView
 import com.example.data.local.UserPreferences
 import com.example.translation.Box
@@ -22,14 +21,16 @@ import com.example.translation.ScreenTranslation
 import kotlin.math.roundToInt
 
 /**
- * Draws translations in a single full-screen window that ignores touches, so the reader underneath keeps
- * scrolling normally. (Previously each bubble was its own touchable window, which blocked scrolling and
- * leaked windows.)
+ * Draws one small, touch-transparent window per translated bubble, so the reader underneath keeps
+ * scrolling normally.
+ *
+ * Android caps the opacity of untouchable overlay windows at 0.8, so a little of the original lettering
+ * ghosts through; the cards are grown to cover it. (FLAG_BLUR_BEHIND was tried to hide it, but on Xiaomi
+ * it blurs the whole screen, which also made the OCR read nothing.)
  */
 class TranslationOverlayLayer(private val context: Context, private val windowManager: WindowManager) {
 
-    private val root = FrameLayout(context)
-    private var attached = false
+    private val cards = mutableListOf<View>()
     private val density = context.resources.displayMetrics.density
     private val scaledDensity = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 1f, context.resources.displayMetrics)
 
@@ -39,40 +40,9 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
 
     val isShowing: Boolean get() = cardBoxes.isNotEmpty()
 
-    fun attach() {
-        if (attached) return
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
-        try {
-            windowManager.addView(root, params)
-            attached = true
-        } catch (e: Exception) {
-            Log.e("MangaLens", "Overlay: não foi possível anexar camada", e)
-        }
-    }
+    /** Cards are added on demand; kept so the service lifecycle reads symmetrically. */
+    fun attach() = Unit
 
-    /**
-     * @param captureWidth/captureHeight size of the frame the boxes refer to (maps to the real screen size).
-     */
     fun show(
         translations: List<ScreenTranslation>,
         prefs: UserPreferences,
@@ -82,45 +52,81 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
         screenHeight: Int
     ) {
         clear()
-        if (!attached || translations.isEmpty() || captureWidth == 0 || captureHeight == 0) return
+        if (translations.isEmpty() || captureWidth == 0 || captureHeight == 0) return
 
         val sx = screenWidth.toFloat() / captureWidth
         val sy = screenHeight.toFloat() / captureHeight
-        val origin = IntArray(2).also { root.getLocationOnScreen(it) }
         val padding = (4 * density).roundToInt()
+        // ML Kit boxes hug the glyphs; grow them so furigana and bubble outlines are covered too.
+        val cover = (6 * density).roundToInt()
         val minWidth = (64 * density).roundToInt()
+        val placed = mutableListOf<Box>()
         val boxes = mutableListOf<Box>()
 
         for (item in translations) {
             val box = Box(
                 (item.box.left * sx).roundToInt(), (item.box.top * sy).roundToInt(),
                 (item.box.right * sx).roundToInt(), (item.box.bottom * sy).roundToInt()
-            )
+            ).inflate(cover, cover)
             // Vertical columns are narrow; widen so horizontal translated text stays readable.
             val targetWidth = when {
                 item.isVertical || box.height > box.width * 1.6f -> maxOf(box.width * 2, box.height * 2 / 3)
                 else -> box.width
-            }.coerceAtLeast(minWidth).coerceAtMost(screenWidth) + padding * 2
-            val innerWidth = targetWidth - padding * 2
+            }.coerceAtLeast(minWidth).coerceAtMost(screenWidth)
             val (textSp, textHeight) = fitText(
-                item.translatedText, innerWidth, box.height, prefs.overlayFontSizeSp.toFloat() + 2f, MIN_TEXT_SP
+                item.translatedText, targetWidth - padding * 2, box.height - padding * 2,
+                prefs.overlayFontSizeSp.toFloat() + 1f, MIN_TEXT_SP
             )
-            val cardHeight = maxOf(box.height, textHeight) + padding * 2
+            val cardHeight = maxOf(box.height, textHeight + padding * 2)
 
             val left = (box.centerX - targetWidth / 2).coerceIn(0, maxOf(0, screenWidth - targetWidth))
             val top = (box.centerY - cardHeight / 2).coerceIn(0, maxOf(0, screenHeight - cardHeight))
+            val rect = Box(left, top, left + targetWidth, top + cardHeight)
+            // Two detections of the same bubble would stack unreadable cards: keep the first.
+            if (placed.any { other ->
+                    val smaller = if (rect.area <= other.area) rect else other
+                    val larger = if (smaller === rect) other else rect
+                    smaller.overlapRatio(larger) > 0.5f
+                }) continue
+            placed += rect
+
             val card = createCard(item.translatedText, textSp, prefs, padding)
-            root.addView(card, FrameLayout.LayoutParams(targetWidth, cardHeight).apply {
-                leftMargin = left - origin[0]
-                topMargin = top - origin[1]
-            })
-            // Masks are kept in capture coordinates, which is what the change detector samples.
-            boxes += Box(
-                (left / sx).toInt(), (top / sy).toInt(),
-                ((left + targetWidth) / sx).toInt(), ((top + cardHeight) / sy).toInt()
-            )
+            try {
+                windowManager.addView(card, cardParams(rect, prefs))
+                cards += card
+                // Masks are kept in capture coordinates, which is what the change detector samples.
+                boxes += Box(
+                    (rect.left / sx).toInt(), (rect.top / sy).toInt(),
+                    (rect.right / sx).toInt(), (rect.bottom / sy).toInt()
+                )
+            } catch (e: Exception) {
+                Log.e("MangaLens", "Overlay: falha ao adicionar card", e)
+            }
         }
         cardBoxes = boxes
+    }
+
+    private fun cardParams(rect: Box, prefs: UserPreferences): WindowManager.LayoutParams {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        return WindowManager.LayoutParams(rect.width, rect.height, type, flags, PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = rect.left
+            y = rect.top
+            // The system clamps untouchable overlays to 0.8 anyway; ask for it explicitly.
+            alpha = prefs.overlayOpacity.coerceIn(0.5f, MAX_UNTOUCHABLE_ALPHA)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
     }
 
     private fun createCard(text: String, textSp: Float, prefs: UserPreferences, padding: Int): View {
@@ -129,7 +135,7 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
             "SEMI_TRANSPARENT" -> Color.BLACK to Color.WHITE
             else -> Color.WHITE to Color.rgb(15, 23, 42)
         }
-        val alpha = if (prefs.bubbleStyle == "SEMI_TRANSPARENT") prefs.overlayOpacity * 0.75f else prefs.overlayOpacity
+        val bgAlpha = if (prefs.bubbleStyle == "SEMI_TRANSPARENT") 0.75f else 1f
         return TextView(context).apply {
             this.text = text
             setTextColor(fgColor)
@@ -140,7 +146,7 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
             setPadding(padding, padding, padding, padding)
             background = GradientDrawable().apply {
                 cornerRadius = 10 * density
-                setColor(Color.argb((alpha.coerceIn(0f, 1f) * 255).roundToInt(), Color.red(bgColor), Color.green(bgColor), Color.blue(bgColor)))
+                setColor(Color.argb((bgAlpha * 255).roundToInt(), Color.red(bgColor), Color.green(bgColor), Color.blue(bgColor)))
             }
         }
     }
@@ -176,19 +182,15 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
     }
 
     fun clear() {
-        root.removeAllViews()
+        cards.forEach { try { windowManager.removeViewImmediate(it) } catch (_: Exception) {} }
+        cards.clear()
         cardBoxes = emptyList()
     }
 
-    fun detach() {
-        clear()
-        if (attached) {
-            try { windowManager.removeView(root) } catch (_: Exception) {}
-            attached = false
-        }
-    }
+    fun detach() = clear()
 
     private companion object {
         const val MIN_TEXT_SP = 7f
+        const val MAX_UNTOUCHABLE_ALPHA = 0.8f
     }
 }

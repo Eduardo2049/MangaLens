@@ -128,9 +128,7 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
             val bitmapToProcess = _uiState.value.customBitmap
 
             if (bitmapToProcess != null) {
-                val result = pipeline.translate(
-                    bitmapToProcess, prefs, fingerprint = System.identityHashCode(bitmapToProcess).toLong()
-                )
+                val result = pipeline.translate(bitmapToProcess, prefs)
                 val width = bitmapToProcess.width.toFloat()
                 val height = bitmapToProcess.height.toFloat()
                 val overlays = result.translations.map {

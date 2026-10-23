@@ -41,11 +41,11 @@ enum class TranslationEngine(
 ) {
     OCR_TEXT(
         "OCR no aparelho + IA no texto",
-        "Mais preciso e econômico: posições exatas e só envia textos novos"
+        "Rápido: só envia o texto novo; a posição vem sempre do OCR"
     ),
     VISION(
-        "IA lê a imagem",
-        "Melhor para mangá japonês vertical; consome mais da cota"
+        "OCR + IA vendo a imagem",
+        "Mais preciso (corrige o OCR, lê texto vertical), porém mais lento"
     )
 }
 

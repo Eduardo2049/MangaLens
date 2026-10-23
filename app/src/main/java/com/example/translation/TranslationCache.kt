@@ -80,24 +80,3 @@ class TextTranslationCache(private val maxEntries: Int = 600) {
         }
     }
 }
-
-/** Small LRU keyed by a perceptual page hash; used by the vision engine, where each miss costs a request. */
-class PageCache<T>(private val maxEntries: Int = 40, private val maxHammingDistance: Int = 4) {
-    private val entries = ArrayDeque<Pair<Long, T>>()
-
-    @Synchronized
-    fun get(fingerprint: Long): T? {
-        val hit = entries.minByOrNull { FrameThumbnail.hammingDistance(it.first, fingerprint) } ?: return null
-        return if (FrameThumbnail.hammingDistance(hit.first, fingerprint) <= maxHammingDistance) hit.second else null
-    }
-
-    @Synchronized
-    fun put(fingerprint: Long, value: T) {
-        entries.removeAll { it.first == fingerprint }
-        entries.addLast(fingerprint to value)
-        while (entries.size > maxEntries) entries.removeFirst()
-    }
-
-    @Synchronized
-    fun clear() = entries.clear()
-}

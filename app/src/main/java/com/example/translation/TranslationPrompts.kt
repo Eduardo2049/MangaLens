@@ -21,13 +21,14 @@ object TranslationPrompts {
 
     // ---------- Text mode (on-device OCR + LLM translation) ----------
 
-    fun textSystemPrompt(source: SupportedLanguage, target: SupportedLanguage) = """
+    fun textSystemPrompt(source: SupportedLanguage, target: SupportedLanguage, withImage: Boolean = false) = """
         ${translatorRules(source, target)}
         - The texts come from OCR and may have wrong characters, missing spaces or broken lines; infer what was meant.
         - The items are the speech bubbles of ONE page in reading order; read all of them before translating so the dialogue flows.
         - "context" holds earlier lines already translated; use it for names, gender and terminology, but do not translate it again.
         - If an item is not readable story text (watermark, website, credits, random OCR noise), return "" for it.
-        Answer ONLY with JSON: {"translations":[{"id":<same id>,"text":"<translation>"}]} with one entry per item.
+        ${if (withImage) "- The page image is attached: use it to correct OCR mistakes, to read vertical text and to understand who is speaking." else ""}
+        Answer ONLY with compact JSON, one entry per item in the same order: {"t":[[<id>,"<translation>"],...]}
     """.trimIndent()
 
     fun textUserPrompt(items: List<Pair<Int, String>>, context: List<Pair<String, String>>): String {
@@ -54,6 +55,11 @@ object TranslationPrompts {
         }
         val result = mutableMapOf<Int, String>()
         for (i in 0 until array.length()) {
+            // Compact form: [id, "translation"].
+            array.optJSONArray(i)?.let { pair ->
+                val id = pair.optInt(0, -1)
+                if (id >= 0) result[id] = pair.optString(1, "").trim()
+            }
             val item = array.optJSONObject(i) ?: continue
             val id = item.optInt("id", -1)
             if (id < 0) continue
@@ -63,94 +69,23 @@ object TranslationPrompts {
         return result
     }
 
-    // ---------- Vision mode (LLM reads the screenshot) ----------
-
-    fun visionSystemPrompt(source: SupportedLanguage, target: SupportedLanguage) = """
-        ${translatorRules(source, target)}
-        You receive a screenshot of a comic reader. Find every piece of story text: speech bubbles, thought bubbles,
-        narration boxes and important sound effects. Ignore the reader app's interface, page numbers and watermarks.
-        Treat each bubble as one item (join its lines). For vertical Japanese text read columns right-to-left.
-        Give a tight bounding box around the text of each item as [ymin, xmin, ymax, xmax], integers normalized to 0-1000
-        of the image height/width.
-        Answer ONLY with JSON:
-        {"items":[{"text":"<original>","translation":"<translation>","box":[ymin,xmin,ymax,xmax],"vertical":false,"type":"SPEECH|THOUGHT|NARRATION|SOUND_EFFECT"}]}
-        If there is no text, answer {"items":[]}.
-    """.trimIndent()
+    private val compactEntry = Regex("""\[\s*(\d+)\s*,\s*("(?:[^"\\]|\\.)*")\s*]""")
+    private val objectEntry = Regex("""\{\s*"id"\s*:\s*(\d+)\s*,\s*"text"\s*:\s*("(?:[^"\\]|\\.)*")\s*}""")
 
     /**
-     * @param imageWidth/imageHeight size of the image that was sent (to interpret absolute pixel boxes).
-     * @param screenWidth/screenHeight capture size the boxes are mapped to.
+     * Entries that are already complete in a still-streaming answer, so bubbles can be shown one by one
+     * instead of waiting for the whole page.
      */
-    fun parseVisionItems(
-        raw: String,
-        imageWidth: Int,
-        imageHeight: Int,
-        screenWidth: Int,
-        screenHeight: Int
-    ): List<ScreenTranslation> {
-        val payload = extractJson(raw) ?: return emptyList()
-        val array = when (payload) {
-            is JSONArray -> payload
-            is JSONObject -> payload.optJSONArray("items") ?: payload.optJSONArray("overlays") ?: return emptyList()
-            else -> return emptyList()
-        }
-        data class RawItem(val original: String, val translated: String, val coords: DoubleArray, val vertical: Boolean, val type: String)
-
-        val items = (0 until array.length()).mapNotNull { i ->
-            val item = array.optJSONObject(i) ?: return@mapNotNull null
-            val original = item.optString("text", item.optString("originalText", "")).trim()
-            val translated = item.optString("translation", item.optString("translatedText", "")).trim()
-            if (translated.isEmpty()) return@mapNotNull null
-            val box = item.optJSONArray("box") ?: item.optJSONArray("box_2d")
-            val coords = if (box != null && box.length() == 4) {
-                DoubleArray(4) { box.optDouble(it, 0.0) }
-            } else if (item.has("yMin")) {
-                doubleArrayOf(item.optDouble("yMin"), item.optDouble("xMin"), item.optDouble("yMax"), item.optDouble("xMax"))
-            } else {
-                return@mapNotNull null
+    fun parsePartialTranslations(partial: String): Map<Int, String> {
+        val result = mutableMapOf<Int, String>()
+        for (regex in listOf(compactEntry, objectEntry)) {
+            for (match in regex.findAll(partial)) {
+                val id = match.groupValues[1].toIntOrNull() ?: continue
+                val text = runCatching { JSONArray("[" + match.groupValues[2] + "]").getString(0) }.getOrNull() ?: continue
+                result[id] = text.trim()
             }
-            if (coords.any { it.isNaN() }) return@mapNotNull null
-            RawItem(original, translated, coords, item.optBoolean("vertical", item.optBoolean("isVertical", false)),
-                item.optString("type", item.optString("bubbleType", "SPEECH")).uppercase())
         }
-        if (items.isEmpty()) return emptyList()
-
-        // Models disagree on units: detect fractions, legacy yMin/xMin percentages, 0-1000, or absolute pixels.
-        val maxCoord = items.maxOf { it.coords.max() }
-        val usesPercent = array.optJSONObject(0)?.has("yMin") == true && maxCoord <= 100.0
-        return items.map { item ->
-            val (y0, x0, y1, x1) = item.coords.toList()
-            fun mapX(v: Double): Int = when {
-                maxCoord <= 1.0 -> v * screenWidth
-                usesPercent -> v / 100.0 * screenWidth
-                maxCoord <= 1000.0 -> v / 1000.0 * screenWidth
-                else -> v / imageWidth * screenWidth
-            }.toInt()
-            fun mapY(v: Double): Int = when {
-                maxCoord <= 1.0 -> v * screenHeight
-                usesPercent -> v / 100.0 * screenHeight
-                maxCoord <= 1000.0 -> v / 1000.0 * screenHeight
-                else -> v / imageHeight * screenHeight
-            }.toInt()
-            val box = Box(
-                minOf(mapX(x0), mapX(x1)), minOf(mapY(y0), mapY(y1)),
-                maxOf(mapX(x0), mapX(x1)), maxOf(mapY(y0), mapY(y1))
-            ).clampTo(screenWidth, screenHeight)
-            ScreenTranslation(item.original, item.translated, box, item.vertical, item.type)
-        }.filter { it.box.width > 4 && it.box.height > 4 }
-    }
-
-    /**
-     * Snaps the model's approximate boxes to the precise boxes found by the local OCR when they overlap.
-     * Vision LLMs read text well but place boxes loosely; ML Kit places boxes exactly.
-     */
-    fun refineWithOcr(items: List<ScreenTranslation>, ocrBlocks: List<OcrBlock>): List<ScreenTranslation> {
-        if (ocrBlocks.isEmpty()) return items
-        return items.map { item ->
-            val search = item.box.inflate(item.box.width / 6, item.box.height / 6)
-            val matches = ocrBlocks.filter { search.contains(it.box.centerX, it.box.centerY) }
-            if (matches.isEmpty()) item else item.copy(box = matches.map { it.box }.reduce(Box::union))
-        }
+        return result
     }
 
     // ---------- JSON helpers ----------

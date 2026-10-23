@@ -40,11 +40,11 @@ android {
     buildConfigField("String", "OPENROUTER_API_KEY", buildString(localSetting("OPENROUTER_API_KEY", "")))
     buildConfigField(
       "String", "OPENROUTER_TEXT_MODELS",
-      buildString(localSetting("OPENROUTER_TEXT_MODELS", "google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free,openrouter/free"))
+      buildString(localSetting("OPENROUTER_TEXT_MODELS", "dots-studio/dots-3-note-preview:free,nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-3-ultra-550b-a55b:free"))
     )
     buildConfigField(
       "String", "OPENROUTER_VISION_MODELS",
-      buildString(localSetting("OPENROUTER_VISION_MODELS", "nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,openrouter/free"))
+      buildString(localSetting("OPENROUTER_VISION_MODELS", "nvidia/nemotron-3.5-super-vl:free,dots-studio/dots-3-note-preview:free,google/gemma-4-31b-it:free"))
     )
     // Free tier: 50 requests/day (1000/day after buying 10 credits once).
     buildConfigField("int", "OPENROUTER_DAILY_LIMIT", localSetting("OPENROUTER_DAILY_LIMIT", "50").toIntOrNull()?.toString() ?: "50")

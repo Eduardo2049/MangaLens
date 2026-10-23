@@ -442,6 +442,25 @@ class MangaOverlayService : Service() {
         translatePage(thumb)
     }
 
+    /** Draws [translations] when the screen still shows the page [thumb] was taken from. */
+    private fun showIfSamePage(
+        thumb: FrameThumbnail,
+        translations: List<com.example.translation.ScreenTranslation>,
+        prefs: com.example.data.local.UserPreferences
+    ): Boolean {
+        val current = captureManager.captureThumbnail(THUMB_COLS, THUMB_ROWS, ownRegions(), statusBarPx)
+        val samePage = current != null && thumb.changedFraction(current) <= PAGE_CHANGED_FRACTION
+        if (samePage && translations.isNotEmpty()) {
+            overlayLayer?.show(
+                translations, prefs,
+                captureManager.width, captureManager.height,
+                captureManager.width, captureManager.height
+            )
+            displayedThumb = thumb
+        }
+        return samePage
+    }
+
     private fun translatePage(thumb: FrameThumbnail) {
         processedThumb = thumb
         translateJob = serviceScope.launch {
@@ -459,25 +478,17 @@ class MangaOverlayService : Service() {
             }
             val result = try {
                 setStatus(Status.TRANSLATING)
-                pipeline.translate(bitmap, prefs, exclusions, thumb.fingerprint())
+                pipeline.translate(bitmap, prefs, exclusions) { ready ->
+                    // Streamed results arrive on an IO thread; windows must be touched on the main thread.
+                    serviceScope.launch { if (translateJob?.isActive == true) showIfSamePage(thumb, ready, prefs) }
+                }
             } finally {
                 bitmap.recycle()
             }
             if (result.requestsSent > 0) updateUsageNotification()
 
             // If the user scrolled meanwhile, the results are cached but no longer belong on screen.
-            val current = captureManager.captureThumbnail(THUMB_COLS, THUMB_ROWS, ownRegions(), statusBarPx)
-            val stillSamePage = current != null && thumb.changedFraction(current) <= PAGE_CHANGED_FRACTION
-            if (stillSamePage && result.translations.isNotEmpty()) {
-                overlayLayer?.show(
-                    result.translations, prefs,
-                    captureManager.width, captureManager.height,
-                    captureManager.width, captureManager.height
-                )
-                displayedThumb = thumb
-            } else if (!stillSamePage) {
-                processedThumb = null
-            }
+            if (!showIfSamePage(thumb, result.translations, prefs)) processedThumb = null
             Log.d(TAG, "Página: ${result.translations.size} traduções, requests=${result.requestsSent}, cache=${result.usedCacheOnly}")
 
             when (val error = result.error) {
@@ -533,9 +544,9 @@ class MangaOverlayService : Service() {
         private const val TAG = "MangaLens"
         private const val NOTIFICATION_ID = 1001
 
-        private const val TICK_MS = 300L
+        private const val TICK_MS = 250L
         /** Time without motion before a page counts as "being read". */
-        private const val SETTLE_MS = 900L
+        private const val SETTLE_MS = 400L
         private const val LONG_PRESS_MS = 550L
         private const val THUMB_COLS = 36
         private const val THUMB_ROWS = 64

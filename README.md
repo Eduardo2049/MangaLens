@@ -1,10 +1,6 @@
 <div align="center">
 
-# MangaLens
-
-**Tradutor visual de mangás em tempo real para Android**
-
-*Traduza mangás, manhwas e webtoons diretamente sobre o leitor, sem sair da leitura — OCR no aparelho + IA gratuita via OpenRouter*
+<img src="assets/cover.svg" alt="MangaLens — tradução de mangá em tempo real, direto no seu leitor" width="100%" />
 
 ![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
@@ -40,7 +36,7 @@ Só os textos NOVOS vão para a OpenRouter, em uma única requisição de texto
 Traduções desenhadas sobre os balões, com fonte ajustada ao tamanho de cada um
 ```
 
-Para mangá japonês **vertical** (que o OCR lê mal) ou quando você escolhe o motor "IA lê a imagem", a página é enviada como imagem para um modelo de visão; as caixas devolvidas pela IA são ajustadas às posições exatas do OCR.
+A **posição** de cada tradução vem sempre do OCR (modelos de IA gratuitos erram coordenadas). Com o motor "OCR + IA vendo a imagem" (Configurações), a página também é enviada como imagem para o modelo corrigir erros do OCR e ler texto vertical — mais preciso, porém mais lento.
 
 ### Por que é econômico
 
@@ -61,7 +57,8 @@ A versão anterior reenviava a tela inteira como imagem a cada ~5 s, porque os p
 | 🔍 **OCR no aparelho** | ML Kit (latim, japonês, coreano, chinês) — posições exatas, sem rede. |
 | 🌐 **Tradução contextual** | Os balões da página vão juntos, com as últimas falas como contexto (nomes, gênero, tom). |
 | 🆓 **OpenRouter grátis** | Usa apenas modelos `:free`, com fallback automático entre eles. |
-| ⏱️ **Espera inteligente** | Traduz quando a tela fica parada ~1 s em conteúdo novo. |
+| ⏱️ **Espera inteligente** | Traduz quando a tela fica parada ~0,4 s em conteúdo novo. |
+| ⚡ **Balões progressivos** | A resposta da IA chega em streaming: cada balão aparece assim que é traduzido, sem esperar a página inteira. |
 | 🧠 **Cache** | Por balão (OCR mode) e por página (modo visão). |
 | 🚦 **Limites respeitados** | Espaça requisições (20/min), conta o uso diário e respeita o `Retry-After` de um 429. |
 | 🪟 **Overlay que não atrapalha** | Uma única camada que ignora toques: o leitor continua rolando normalmente. |
@@ -94,10 +91,10 @@ OPENROUTER_API_KEY=sk-or-v1-...
 Opcional no mesmo arquivo:
 
 ```properties
-# Modelos em ordem de preferência (todos gratuitos). A lista de modelos free muda com o tempo:
+# Modelos em ordem de preferência (todos gratuitos, no máximo 3: limite da OpenRouter). A lista de modelos free muda com o tempo:
 # https://openrouter.ai/models?max_price=0
-OPENROUTER_TEXT_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free,openrouter/free
-OPENROUTER_VISION_MODELS=nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,openrouter/free
+OPENROUTER_TEXT_MODELS=dots-studio/dots-3-note-preview:free,nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-3-ultra-550b-a55b:free
+OPENROUTER_VISION_MODELS=nvidia/nemotron-3.5-super-vl:free,dots-studio/dots-3-note-preview:free,google/gemma-4-31b-it:free
 # Limite diário que o app impõe a si mesmo (free: 50/dia; 1000/dia após comprar 10 créditos uma vez)
 OPENROUTER_DAILY_LIMIT=50
 ```
@@ -161,7 +158,7 @@ adb logcat -c
 adb logcat | Select-String "MangaLens|AndroidRuntime"
 ```
 
-Cada requisição registra `model=... tokens=...`, e cada página `Página: N traduções, requests=0|1, cache=true|false`.
+Cada tradução registra o tempo do OCR e da API, e cada requisição `model=... tokens=...`, e cada página `Página: N traduções, requests=0|1, cache=true|false`.
 
 ## Backend (opcional)
 
@@ -208,7 +205,8 @@ backend/src/server.js                 Proxy OpenRouter (opcional)
 | `LIMITE ⏳` | Limite por minuto/dia da OpenRouter. Aguarde; o app tenta sozinho. |
 | `ERRO ●` com "OpenRouter: ..." | Modelo indisponível: troque `OPENROUTER_TEXT_MODELS` por modelos free atuais. |
 | Nada é traduzido | Confira se a captura é "Tela inteira" e se o idioma de origem está certo (ou "Detectar"). |
-| Mangá japonês vertical mal traduzido | Use o motor "IA lê a imagem" nas Configurações. |
+| Texto lido errado (OCR) ou mangá vertical | Use o motor "OCR + IA vendo a imagem" nas Configurações. |
+| Tradução lenta | Veja no logcat `OCR: ... ms` e `API: ... ms` para saber qual etapa demora; modelos free variam de velocidade, ajuste `OPENROUTER_TEXT_MODELS`. |
 | Backend não conecta | `npm start` em `backend/`, `/health`, IPv4 correto e firewall. |
 | APK não compila | Confirme JDK 17 e Android SDK 35. |
 

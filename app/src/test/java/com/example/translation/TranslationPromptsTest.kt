@@ -29,31 +29,22 @@ class TranslationPromptsTest {
     }
 
     @Test
+    fun `parses compact translations`() {
+        val raw = """{"t":[[1,"Saiam já!"],[2,"Ele disse \"não\""]]}"""
+        assertEquals(mapOf(1 to "Saiam já!", 2 to "Ele disse \"não\""), TranslationPrompts.parseTextTranslations(raw))
+    }
+
+    @Test
+    fun `partial stream yields only finished entries`() {
+        val streaming = """{"t":[[1,"Pague!"],[2,"Entre"],[3,"Ainda escreven"""
+        assertEquals(mapOf(1 to "Pague!", 2 to "Entre"), TranslationPrompts.parsePartialTranslations(streaming))
+        val objectStyle = """{"translations":[{"id":4,"text":"Idiota!"},{"id":5,"te"""
+        assertEquals(mapOf(4 to "Idiota!"), TranslationPrompts.parsePartialTranslations(objectStyle))
+    }
+
+    @Test
     fun `garbage yields no translations`() {
         assertTrue(TranslationPrompts.parseTextTranslations("not json").isEmpty())
-    }
-
-    @Test
-    fun `vision boxes in 0-1000 are mapped to screen pixels`() {
-        val raw = """{"items":[{"text":"何","translation":"O quê?","box":[100,200,150,400],"type":"speech"}]}"""
-        val items = TranslationPrompts.parseVisionItems(raw, 576, 1280, 1080, 2400)
-        assertEquals(1, items.size)
-        assertEquals(Box(216, 240, 432, 360), items[0].box)
-        assertEquals("SPEECH", items[0].bubbleType)
-    }
-
-    @Test
-    fun `vision boxes in absolute pixels of the sent image are rescaled`() {
-        val raw = """{"items":[{"text":"a","translation":"b","box":[640,288,1280,576]}]}"""
-        val items = TranslationPrompts.parseVisionItems(raw, 576, 1280, 1080, 2400)
-        assertEquals(Box(540, 1200, 1080, 2400), items[0].box)
-    }
-
-    @Test
-    fun `vision boxes snap to precise ocr boxes`() {
-        val item = ScreenTranslation("a", "b", Box(100, 100, 300, 300))
-        val ocr = listOf(OcrBlock("a", Box(150, 140, 260, 280), 30), OcrBlock("far", Box(800, 800, 900, 900), 30))
-        assertEquals(Box(150, 140, 260, 280), TranslationPrompts.refineWithOcr(listOf(item), ocr)[0].box)
     }
 
     @Test

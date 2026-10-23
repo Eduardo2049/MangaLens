@@ -6,6 +6,8 @@ import android.util.Log
 import com.example.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -44,7 +46,9 @@ class OpenRouterClient(
         systemPrompt: String,
         userText: String,
         image: Bitmap? = null,
-        maxTokens: Int = 2048
+        maxTokens: Int = 2048,
+        /** When set, the answer is streamed and this receives the text accumulated so far (IO thread). */
+        onText: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val userContent: Any = if (image == null) {
@@ -60,7 +64,7 @@ class OpenRouterClient(
                     )
             }
             val body = JSONObject()
-                .put("models", JSONArray(models))
+                .put("models", JSONArray(models.take(MAX_FALLBACK_MODELS)))
                 .put(
                     "messages", JSONArray()
                         .put(JSONObject().put("role", "system").put("content", systemPrompt))
@@ -71,6 +75,7 @@ class OpenRouterClient(
                 .put("response_format", JSONObject().put("type", "json_object"))
                 // Thinking adds latency and burns the free quota; translation does not need it.
                 .put("reasoning", JSONObject().put("enabled", false))
+                .put("stream", onText != null)
 
             val request = Request.Builder()
                 .url(endpoint)
@@ -81,10 +86,11 @@ class OpenRouterClient(
                 .build()
 
             val content = httpClient.newCall(request).await().use { response ->
-                val text = response.body?.string().orEmpty()
                 if (response.code == 429) {
                     throw RateLimitedException(retryAfterMillis(response), "Limite de requisições da OpenRouter atingido")
                 }
+                if (onText != null && response.isSuccessful) return@use readStream(response, onText)
+                val text = response.body?.string().orEmpty()
                 val json = runCatching { JSONObject(text) }.getOrNull()
                 val error = json?.optJSONObject("error")
                 if (!response.isSuccessful || error != null) {
@@ -107,6 +113,35 @@ class OpenRouterClient(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Reads an OpenAI-style server-sent-event stream. Lines starting with ":" are OpenRouter keep-alive
+     * comments; an `error` object can arrive mid-stream when the provider fails after starting.
+     */
+    private suspend fun readStream(response: Response, onText: (String) -> Unit): String {
+        val source = response.body?.source() ?: throw IOException("OpenRouter devolveu resposta vazia")
+        val text = StringBuilder()
+        var model: String? = null
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val line = source.readUtf8Line() ?: break
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            if (data == "[DONE]") break
+            val chunk = runCatching { JSONObject(data) }.getOrNull() ?: continue
+            chunk.optJSONObject("error")?.let { throw IOException("OpenRouter: ${it.optString("message")}") }
+            if (model == null) model = chunk.optString("model").takeIf { it.isNotEmpty() }
+            // `content` is JSON null on the final chunk; optString would turn that into "null".
+            val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")?.opt("content") as? String
+            if (!delta.isNullOrEmpty()) {
+                text.append(delta)
+                onText(text.toString())
+            }
+        }
+        Log.d(TAG, "model=$model stream chars=${text.length}")
+        if (text.isBlank()) throw IOException("OpenRouter devolveu resposta vazia")
+        return text.toString()
     }
 
     private fun retryAfterMillis(response: Response): Long {
@@ -137,6 +172,8 @@ class OpenRouterClient(
 
     companion object {
         private const val TAG = "MangaLens"
+        /** OpenRouter rejects a `models` list longer than this. */
+        private const val MAX_FALLBACK_MODELS = 3
         private const val OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
         val textModels: List<String> = parseModels(BuildConfig.OPENROUTER_TEXT_MODELS)
@@ -155,9 +192,9 @@ class OpenRouterClient(
         private val sharedHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(90, TimeUnit.SECONDS)
+                .readTimeout(45, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
-                .callTimeout(120, TimeUnit.SECONDS)
+                .callTimeout(60, TimeUnit.SECONDS)
                 .build()
         }
     }

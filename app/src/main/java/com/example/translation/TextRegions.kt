@@ -74,7 +74,12 @@ object TextRegions {
         }
         return blocks.indices.groupBy { find(it) }.values
             .map { group ->
-                val members = group.map { blocks[it] }.sortedWith(compareBy({ it.box.top }, { it.box.left }))
+                val allVertical = group.all { isVerticalColumn(blocks[it]) }
+                // Vertical Japanese/Chinese is read right-to-left; everything else top-to-bottom.
+                val members = group.map { blocks[it] }.let { list ->
+                    if (allVertical) list.sortedByDescending { it.box.right }
+                    else list.sortedWith(compareBy({ it.box.top }, { it.box.left }))
+                }
                 OcrBlock(
                     text = members.joinToString(" ") { it.text.trim() },
                     box = members.map { it.box }.reduce(Box::union),
@@ -85,7 +90,16 @@ object TextRegions {
             .sortedWith(compareBy({ it.box.top }, { it.box.left }))
     }
 
+    private fun isVerticalColumn(b: OcrBlock) = b.box.height > b.box.width * 1.5f
+
     private fun belongTogether(a: OcrBlock, b: OcrBlock): Boolean {
+        if (isVerticalColumn(a) && isVerticalColumn(b)) {
+            // Neighbouring columns of one vertical bubble.
+            val columnWidth = max(a.lineHeight, b.lineHeight).coerceAtLeast(1)
+            val horizontalGap = max(a.box.left, b.box.left) - min(a.box.right, b.box.right)
+            val verticalOverlap = min(a.box.bottom, b.box.bottom) - max(a.box.top, b.box.top)
+            return horizontalGap < columnWidth * 1.2f && verticalOverlap > min(a.box.height, b.box.height) * 0.35f
+        }
         val lineHeight = max(a.lineHeight, b.lineHeight).coerceAtLeast(1)
         val verticalGap = max(a.box.top, b.box.top) - min(a.box.bottom, b.box.bottom)
         if (verticalGap > lineHeight * 0.9f) return false

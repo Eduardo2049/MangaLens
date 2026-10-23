@@ -40,14 +40,6 @@ class TranslationLogicTest {
     }
 
     @Test
-    fun `page cache matches near-identical fingerprints`() {
-        val cache = PageCache<String>()
-        cache.put(0b1011L, "page")
-        assertEquals("page", cache.get(0b1001L))
-        assertNull(cache.get(-1L))
-    }
-
-    @Test
     fun `lines of one bubble are merged and noise is dropped`() {
         val blocks = listOf(
             OcrBlock("I can't believe", Box(100, 100, 300, 130), lineHeight = 30),
@@ -70,5 +62,18 @@ class TranslationLogicTest {
         )
         assertTrue(TextRegions.isMostlyVertical(columns))
         assertTrue(!TextRegions.isMostlyVertical(listOf(OcrBlock("Hello there", Box(0, 0, 300, 40), 40))))
+    }
+
+    @Test
+    fun `columns of one vertical bubble merge right to left`() {
+        val columns = listOf(
+            OcrBlock("ここに", Box(450, 100, 490, 300), 40),
+            OcrBlock("どうして", Box(500, 110, 540, 310), 40),
+            OcrBlock("別の吹き出し", Box(100, 900, 140, 1100), 40)
+        )
+        val merged = TextRegions.mergeIntoBubbles(columns)
+        assertEquals(2, merged.size)
+        assertEquals("どうして ここに", merged[0].text)
+        assertEquals(Box(450, 100, 540, 310), merged[0].box)
     }
 }

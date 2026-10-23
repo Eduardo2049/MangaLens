@@ -31,42 +31,8 @@ class FrameThumbnail(val cols: Int, val rows: Int, val luma: IntArray) {
         return if (compared == 0) 0f else changed.toFloat() / compared
     }
 
-    /** 64-bit difference hash, robust to small brightness shifts; used as the page cache key. */
-    fun fingerprint(): Long {
-        // Downsample to 9x8 blocks, then compare horizontally adjacent blocks.
-        val bw = 9
-        val bh = 8
-        val blocks = IntArray(bw * bh)
-        for (by in 0 until bh) {
-            for (bx in 0 until bw) {
-                var sum = 0L
-                var n = 0
-                val x0 = bx * cols / bw
-                val x1 = ((bx + 1) * cols / bw).coerceAtLeast(x0 + 1)
-                val y0 = by * rows / bh
-                val y1 = ((by + 1) * rows / bh).coerceAtLeast(y0 + 1)
-                for (y in y0 until y1) for (x in x0 until x1) {
-                    val v = luma[y * cols + x]
-                    if (v != MASKED) {
-                        sum += v; n++
-                    }
-                }
-                blocks[by * bw + bx] = if (n == 0) 0 else (sum / n).toInt()
-            }
-        }
-        var hash = 0L
-        var bit = 0
-        for (by in 0 until bh) for (bx in 0 until bw - 1) {
-            if (blocks[by * bw + bx] > blocks[by * bw + bx + 1]) hash = hash or (1L shl bit)
-            bit++
-        }
-        return hash
-    }
-
     companion object {
         const val MASKED = -1
         const val DEFAULT_CELL_THRESHOLD = 18
-
-        fun hammingDistance(a: Long, b: Long): Int = java.lang.Long.bitCount(a xor b)
     }
 }

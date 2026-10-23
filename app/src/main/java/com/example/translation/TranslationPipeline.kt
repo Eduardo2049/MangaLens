@@ -2,10 +2,10 @@ package com.example.translation
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.util.Log
 import com.example.BuildConfig
 import com.example.data.local.UserPreferences
-import com.example.data.model.SupportedLanguage
 import com.example.data.model.TranslationEngine
 import com.example.data.remote.OpenRouterClient
 import com.example.data.remote.RateLimitedException
@@ -24,11 +24,12 @@ class DailyLimitReachedException(limit: Int) :
 
 /**
  * Translates a screenshot as cheaply as possible:
- * 1. on-device OCR finds the text and its exact position (free);
+ * 1. on-device OCR finds the text and its exact position (free) — positions ALWAYS come from the OCR,
+ *    never from the language model, which places boxes badly;
  * 2. bubbles already translated come from the cache (free — typical while scrolling a webtoon);
- * 3. only the new bubbles go to OpenRouter, as text, in a single request.
- * Pages without text never reach the network. Vision mode (the LLM reads the image) is used when chosen
- * in settings or when the page is vertical Japanese/Chinese, which the OCR reads poorly.
+ * 3. only the new bubbles go to OpenRouter in a single request. With the "image" engine the screenshot is
+ *    attached too, so the model can fix OCR mistakes and read vertical text (slower, uses more quota).
+ * Pages without text never reach the network.
  */
 class TranslationPipeline(
     context: Context,
@@ -37,53 +38,71 @@ class TranslationPipeline(
 ) {
     val budget = RequestBudget(context.applicationContext, BuildConfig.OPENROUTER_DAILY_LIMIT)
     private val textCache = TextTranslationCache()
-    private val pageCache = PageCache<List<ScreenTranslation>>()
 
     suspend fun translate(
         bitmap: Bitmap,
         prefs: UserPreferences,
         exclusions: List<Box> = emptyList(),
-        fingerprint: Long? = null
+        /** Called with what is ready so far: cached bubbles first, then streamed ones (may be an IO thread). */
+        onPartial: (List<ScreenTranslation>) -> Unit = {}
     ): PageResult {
         if (!client.isConfigured) {
             return PageResult(emptyList(), 0, IllegalStateException("Configure OPENROUTER_API_KEY no local.properties"))
         }
-        val width = bitmap.width
-        val height = bitmap.height
-        val blocks = TextRegions.prepare(ocr.recognize(bitmap, prefs.sourceLanguage), exclusions, width, height)
-        Log.d(TAG, "OCR: ${blocks.size} regiões de texto")
-
-        val verticalScript = prefs.sourceLanguage in setOf(SupportedLanguage.AUTO, SupportedLanguage.JAPANESE, SupportedLanguage.CHINESE) &&
-            TextRegions.isMostlyVertical(blocks)
-        return if (prefs.translationEngine == TranslationEngine.VISION || verticalScript) {
-            translateWithVision(bitmap, prefs, blocks, fingerprint)
-        } else {
-            translateTextBlocks(blocks, prefs)
-        }
+        val ocrStart = SystemClock.elapsedRealtime()
+        val blocks = TextRegions.prepare(
+            ocr.recognize(bitmap, prefs.sourceLanguage), exclusions, bitmap.width, bitmap.height
+        )
+        Log.d(TAG, "OCR: ${blocks.size} regiões em ${SystemClock.elapsedRealtime() - ocrStart}ms")
+        return translateBlocks(blocks, prefs, bitmap.takeIf { prefs.translationEngine == TranslationEngine.VISION }, onPartial)
     }
 
-    private suspend fun translateTextBlocks(blocks: List<OcrBlock>, prefs: UserPreferences): PageResult {
+    private suspend fun translateBlocks(
+        blocks: List<OcrBlock>,
+        prefs: UserPreferences,
+        image: Bitmap?,
+        onPartial: (List<ScreenTranslation>) -> Unit
+    ): PageResult {
         if (blocks.isEmpty()) return PageResult(emptyList(), 0, usedCacheOnly = true)
-        val pair = languagePair(prefs)
+        val pair = "${prefs.sourceLanguage.code}>${prefs.targetLanguage.code}"
 
         val missing = blocks.filter { textCache.get(pair, it.text) == null }
             .distinctBy { TextTranslationCache.normalize(it.text) }
         var error: Throwable? = null
         var requests = 0
         if (missing.isNotEmpty()) {
-            val ready = awaitBudget()
-            if (ready != null) {
-                error = ready
+            val cached = cachedTranslations(blocks, pair)
+            if (cached.isNotEmpty()) onPartial(cached)
+            val blocked = awaitBudget()
+            if (blocked != null) {
+                error = blocked
             } else {
                 requests = 1
                 budget.recordRequest()
                 val items = missing.mapIndexed { index, block -> index + 1 to block.text }
+                val apiStart = SystemClock.elapsedRealtime()
+                var emitted = 0
+                var lastEmitAt = 0L
                 val result = client.complete(
-                    models = OpenRouterClient.textModels,
-                    systemPrompt = TranslationPrompts.textSystemPrompt(prefs.sourceLanguage, prefs.targetLanguage),
+                    models = if (image != null) OpenRouterClient.visionModels else OpenRouterClient.textModels,
+                    systemPrompt = TranslationPrompts.textSystemPrompt(prefs.sourceLanguage, prefs.targetLanguage, image != null),
                     userText = TranslationPrompts.textUserPrompt(items, textCache.recent(pair, CONTEXT_LINES)),
-                    maxTokens = 400 + missing.sumOf { it.text.length } * 6
+                    image = image,
+                    maxTokens = 300 + missing.sumOf { it.text.length } * 5,
+                    onText = { soFar ->
+                        // Show bubbles while the model is still writing the rest of the page.
+                        val done = TranslationPrompts.parsePartialTranslations(soFar)
+                        val now = SystemClock.elapsedRealtime()
+                        if (done.size > emitted && now - lastEmitAt >= STREAM_EMIT_INTERVAL_MS) {
+                            items.forEach { (id, text) -> done[id]?.let { textCache.put(pair, text, it) } }
+                            if (emitted == 0) Log.d(TAG, "API: primeiro balão em ${now - apiStart}ms")
+                            emitted = done.size
+                            lastEmitAt = now
+                            onPartial(cachedTranslations(blocks, pair))
+                        }
+                    }
                 )
+                Log.d(TAG, "API: ${items.size} textos em ${SystemClock.elapsedRealtime() - apiStart}ms (ok=${result.isSuccess})")
                 result.onSuccess { raw ->
                     val parsed = TranslationPrompts.parseTextTranslations(raw)
                     if (parsed.isEmpty()) error = IllegalStateException("Resposta da IA sem traduções válidas")
@@ -93,48 +112,14 @@ class TranslationPipeline(
             }
         }
 
-        val translations = blocks.mapNotNull { block ->
+        return PageResult(cachedTranslations(blocks, pair), requests, error, usedCacheOnly = missing.isEmpty())
+    }
+
+    private fun cachedTranslations(blocks: List<OcrBlock>, pair: String): List<ScreenTranslation> =
+        blocks.mapNotNull { block ->
             val translated = textCache.get(pair, block.text)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             ScreenTranslation(block.text, translated, block.box)
         }
-        return PageResult(translations, requests, error, usedCacheOnly = missing.isEmpty())
-    }
-
-    private suspend fun translateWithVision(
-        bitmap: Bitmap,
-        prefs: UserPreferences,
-        ocrBlocks: List<OcrBlock>,
-        fingerprint: Long?
-    ): PageResult {
-        val cacheKey = fingerprint?.let { it xor languagePair(prefs).hashCode().toLong() }
-        cacheKey?.let { key -> pageCache.get(key)?.let { return PageResult(it, 0, usedCacheOnly = true) } }
-
-        awaitBudget()?.let { return PageResult(emptyList(), 0, it) }
-        budget.recordRequest()
-        // Mirrors OpenRouterClient's downscale, in case the model answers in absolute pixels.
-        val scale = minOf(1f, 1280f / maxOf(bitmap.width, bitmap.height))
-        val sentWidth = (bitmap.width * scale).toInt()
-        val sentHeight = (bitmap.height * scale).toInt()
-
-        val result = client.complete(
-            models = OpenRouterClient.visionModels,
-            systemPrompt = TranslationPrompts.visionSystemPrompt(prefs.sourceLanguage, prefs.targetLanguage),
-            userText = "Translate this page.",
-            image = bitmap,
-            maxTokens = 3000
-        )
-        return result.fold(
-            onSuccess = { raw ->
-                val items = TranslationPrompts.parseVisionItems(raw, sentWidth, sentHeight, bitmap.width, bitmap.height)
-                val refined = TranslationPrompts.refineWithOcr(items, ocrBlocks)
-                val pair = languagePair(prefs)
-                refined.forEach { if (it.originalText.isNotBlank()) textCache.put(pair, it.originalText, it.translatedText) }
-                cacheKey?.let { pageCache.put(it, refined) }
-                PageResult(refined, 1)
-            },
-            onFailure = { PageResult(emptyList(), 1, handleFailure(it)) }
-        )
-    }
 
     /** Waits for the per-minute spacing; returns an error when the daily limit or a long cool-down applies. */
     private suspend fun awaitBudget(): Throwable? {
@@ -152,13 +137,12 @@ class TranslationPipeline(
         return error
     }
 
-    private fun languagePair(prefs: UserPreferences) = "${prefs.sourceLanguage.code}>${prefs.targetLanguage.code}"
-
     fun close() = ocr.close()
 
     private companion object {
         const val TAG = "MangaLens"
-        const val CONTEXT_LINES = 12
+        const val CONTEXT_LINES = 8
+        const val STREAM_EMIT_INTERVAL_MS = 350L
         const val MAX_INLINE_WAIT_MS = 8_000L
     }
 }
