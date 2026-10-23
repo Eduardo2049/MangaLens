@@ -50,6 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.UserPreferences
 import com.example.data.model.SupportedLanguage
+import com.example.data.model.TranslationEngine
+import com.example.data.model.TranslationMode
+import com.example.data.remote.OpenRouterClient
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,7 +65,9 @@ fun SettingsBottomSheet(
     onUpdateOpacity: (Float) -> Unit,
     onUpdateFontSize: (Int) -> Unit,
     onUpdateBubbleStyle: (String) -> Unit,
-    onUpdateReadingMode: (String) -> Unit
+    onUpdateReadingMode: (String) -> Unit,
+    onUpdateTranslationMode: (TranslationMode) -> Unit = {},
+    onUpdateTranslationEngine: (TranslationEngine) -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -99,6 +104,40 @@ fun SettingsBottomSheet(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.padding(bottom = 24.dp)
             ) {
+                item {
+                    SettingsSectionTitle("Quando traduzir")
+                    TranslationMode.entries.forEach { mode ->
+                        SettingsChoiceRow(
+                            title = mode.title,
+                            description = mode.description,
+                            selected = userPreferences.translationMode == mode,
+                            onClick = { onUpdateTranslationMode(mode) }
+                        )
+                    }
+                }
+
+                item {
+                    SettingsSectionTitle("Motor de tradução")
+                    TranslationEngine.entries.forEach { engine ->
+                        SettingsChoiceRow(
+                            title = engine.title,
+                            description = engine.description,
+                            selected = userPreferences.translationEngine == engine,
+                            onClick = { onUpdateTranslationEngine(engine) }
+                        )
+                    }
+                    Text(
+                        text = if (OpenRouterClient.usesDirectKey()) {
+                            "OpenRouter (chave local) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
+                        } else {
+                            "OpenRouter via backend MangaLens"
+                        },
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
                 // Opacity Slider
                 item {
                     SettingsSectionTitle("Opacidade do Balão Traduzido")
@@ -337,6 +376,33 @@ fun LanguagePickerDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsChoiceRow(
+    title: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp)
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = onClick,
+            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF38BDF8))
+        )
+        Column {
+            Text(text = title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = description, color = Color(0xFF94A3B8), fontSize = 11.sp)
         }
     }
 }

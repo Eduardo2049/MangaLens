@@ -92,6 +92,12 @@ fun MangaReaderScreen(
         viewModel.updateOverlayPermissionGranted(hasOverlayPermission)
     }
 
+    // Mirror the real service state (it can stop itself: ✖ on the bubble, capture revoked, errors).
+    val serviceRunning by MangaOverlayService.isRunning.collectAsState()
+    LaunchedEffect(serviceRunning) {
+        viewModel.setOverlayActive(serviceRunning)
+    }
+
     // Image Picker Launcher for importing custom Manga page to test
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -315,9 +321,8 @@ fun MangaReaderScreen(
                                     viewModel.setOverlayActive(false)
                                     Toast.makeText(context, "Bolha flutuante desativada", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    onRequestScreenCapture { granted ->
-                                        viewModel.setOverlayActive(granted)
-                                    }
+                                    // The active state follows MangaOverlayService.isRunning once capture starts.
+                                    onRequestScreenCapture { }
                                 }
                             }
                         },
@@ -620,7 +625,9 @@ fun MangaReaderScreen(
             onUpdateOpacity = { viewModel.updateOverlayOpacity(it) },
             onUpdateFontSize = { viewModel.updateOverlayFontSize(it) },
             onUpdateBubbleStyle = { viewModel.updateBubbleStyle(it) },
-            onUpdateReadingMode = { }
+            onUpdateReadingMode = { },
+            onUpdateTranslationMode = { viewModel.setTranslationMode(it) },
+            onUpdateTranslationEngine = { viewModel.setTranslationEngine(it) }
         )
     }
 

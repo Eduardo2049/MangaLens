@@ -3,6 +3,7 @@ package com.example.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.data.model.SupportedLanguage
+import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +13,7 @@ data class UserPreferences(
     val sourceLanguage: SupportedLanguage = SupportedLanguage.AUTO,
     val targetLanguage: SupportedLanguage = SupportedLanguage.PORTUGUESE,
     val translationMode: TranslationMode = TranslationMode.DYNAMIC,
+    val translationEngine: TranslationEngine = TranslationEngine.OCR_TEXT,
     val isTranslationEnabled: Boolean = true,
     val overlayOpacity: Float = 0.92f,
     val overlayFontSizeSp: Int = 13,
@@ -25,10 +27,21 @@ class UserPreferencesRepository(context: Context) {
     private val _preferences = MutableStateFlow(loadPreferences())
     val preferences: StateFlow<UserPreferences> = _preferences.asStateFlow()
 
+    // The app UI and the overlay service each own a repository instance; this listener keeps the
+    // service in sync when settings change in the app. Kept as a field: SharedPreferences holds it weakly.
+    private val changeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        _preferences.value = loadPreferences()
+    }
+
+    init {
+        prefs.registerOnSharedPreferenceChangeListener(changeListener)
+    }
+
     private fun loadPreferences(): UserPreferences {
         val srcCode = prefs.getString("source_lang", SupportedLanguage.AUTO.code) ?: SupportedLanguage.AUTO.code
         val tgtCode = prefs.getString("target_lang", SupportedLanguage.PORTUGUESE.code) ?: SupportedLanguage.PORTUGUESE.code
         val modeStr = prefs.getString("translation_mode", TranslationMode.DYNAMIC.name) ?: TranslationMode.DYNAMIC.name
+        val engineStr = prefs.getString("translation_engine", TranslationEngine.OCR_TEXT.name) ?: TranslationEngine.OCR_TEXT.name
         val isEnabled = prefs.getBoolean("is_translation_enabled", true)
         val opacity = prefs.getFloat("overlay_opacity", 0.92f)
         val fontSize = prefs.getInt("overlay_font_size", 13)
@@ -39,6 +52,7 @@ class UserPreferencesRepository(context: Context) {
             sourceLanguage = SupportedLanguage.fromCode(srcCode),
             targetLanguage = SupportedLanguage.fromCode(tgtCode),
             translationMode = try { TranslationMode.valueOf(modeStr) } catch (e: Exception) { TranslationMode.DYNAMIC },
+            translationEngine = try { TranslationEngine.valueOf(engineStr) } catch (e: Exception) { TranslationEngine.OCR_TEXT },
             isTranslationEnabled = isEnabled,
             overlayOpacity = opacity,
             overlayFontSizeSp = fontSize,
@@ -60,6 +74,11 @@ class UserPreferencesRepository(context: Context) {
     fun updateTranslationMode(mode: TranslationMode) {
         prefs.edit().putString("translation_mode", mode.name).apply()
         _preferences.value = _preferences.value.copy(translationMode = mode)
+    }
+
+    fun updateTranslationEngine(engine: TranslationEngine) {
+        prefs.edit().putString("translation_engine", engine.name).apply()
+        _preferences.value = _preferences.value.copy(translationEngine = engine)
     }
 
     fun setTranslationEnabled(enabled: Boolean) {

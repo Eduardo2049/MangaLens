@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="MangaLens">
+<defs>
+  <linearGradient id="cbg" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#0F0C29"/><stop offset="0.55" stop-color="#312E81"/><stop offset="1" stop-color="#831843"/>
+  </linearGradient>
+  <radialGradient id="glow" cx="300" cy="320" r="320" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#22D3EE" stop-opacity="0.35"/><stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+  </radialGradient>
+  <clipPath id="iconmask"><rect x="0" y="0" width="108" height="108" rx="26"/></clipPath>
+</defs>
+<rect width="1280" height="640" fill="url(#cbg)"/>
+<g fill="#fff" fill-opacity="0.05">
+  <path d="M1400,-120 L700,0 L760,0 Z"/><path d="M1400,-120 L900,0 L930,0 Z"/>
+  <path d="M1400,-120 L1280,260 L1280,300 Z"/><path d="M1400,-120 L1280,420 L1280,440 Z"/>
+  <path d="M1400,-120 L1080,0 L1100,0 Z"/>
+</g>
+<circle cx="300" cy="320" r="320" fill="url(#glow)"/>
+<g transform="translate(150,170) scale(2.78)"><g clip-path="url(#iconmask)"><defs>
+  <linearGradient id="kbg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse"><stop offset="0.0" stop-color="#1E1B4B"/><stop offset="0.55" stop-color="#5B21B6"/><stop offset="1.0" stop-color="#DB2777"/></linearGradient>
+  <clipPath id="klens"><path d="M45.5,52 a14.5,14.5 0 1,0 29.0,0 a14.5,14.5 0 1,0 -29.0,0 Z"/></clipPath>
+</defs>
+<path d="M0,0h108v108h-108z" fill="url(#kbg)"/>
+<path d="M118,-10 L56,22 L61,21 Z M118,-10 L70,22 L73,22 Z M118,-10 L83,30 L85,32 Z M118,-10 L88,44 L89,47 Z" fill="#fff" fill-opacity="0.16"/>
+<path d="M24.26,56 a0.74,0.74 0 1,0 1.48,0 a0.74,0.74 0 1,0 -1.48,0 Z M24.03,61 a0.97,0.97 0 1,0 1.94,0 a0.97,0.97 0 1,0 -1.94,0 Z M23.81,66 a1.19,1.19 0 1,0 2.38,0 a1.19,1.19 0 1,0 -2.38,0 Z M23.59,71 a1.41,1.41 0 1,0 2.82,0 a1.41,1.41 0 1,0 -2.82,0 Z M29.31,56 a0.69,0.69 0 1,0 1.38,0 a0.69,0.69 0 1,0 -1.38,0 Z M29.1,61 a0.9,0.9 0 1,0 1.8,0 a0.9,0.9 0 1,0 -1.8,0 Z M28.88,66 a1.12,1.12 0 1,0 2.24,0 a1.12,1.12 0 1,0 -2.24,0 Z M28.68,71 a1.32,1.32 0 1,0 2.64,0 a1.32,1.32 0 1,0 -2.64,0 Z M28.48,76 a1.52,1.52 0 1,0 3.04,0 a1.52,1.52 0 1,0 -3.04,0 Z M34.39,56 a0.61,0.61 0 1,0 1.22,0 a0.61,0.61 0 1,0 -1.22,0 Z M34.19,61 a0.81,0.81 0 1,0 1.62,0 a0.81,0.81 0 1,0 -1.62,0 Z M33.99,66 a1.01,1.01 0 1,0 2.02,0 a1.01,1.01 0 1,0 -2.02,0 Z M33.8,71 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0 Z M33.63,76 a1.37,1.37 0 1,0 2.74,0 a1.37,1.37 0 1,0 -2.74,0 Z M33.47,81 a1.53,1.53 0 1,0 3.06,0 a1.53,1.53 0 1,0 -3.06,0 Z M39.5,56 a0.5,0.5 0 1,0 1.0,0 a0.5,0.5 0 1,0 -1.0,0 Z M39.3,61 a0.7,0.7 0 1,0 1.4,0 a0.7,0.7 0 1,0 -1.4,0 Z M39.12,66 a0.88,0.88 0 1,0 1.76,0 a0.88,0.88 0 1,0 -1.76,0 Z M38.95,71 a1.05,1.05 0 1,0 2.1,0 a1.05,1.05 0 1,0 -2.1,0 Z M38.79,76 a1.21,1.21 0 1,0 2.42,0 a1.21,1.21 0 1,0 -2.42,0 Z M38.66,81 a1.34,1.34 0 1,0 2.68,0 a1.34,1.34 0 1,0 -2.68,0 Z M44.62,56 a0.38,0.38 0 1,0 0.76,0 a0.38,0.38 0 1,0 -0.76,0 Z M44.44,61 a0.56,0.56 0 1,0 1.12,0 a0.56,0.56 0 1,0 -1.12,0 Z M44.27,66 a0.73,0.73 0 1,0 1.46,0 a0.73,0.73 0 1,0 -1.46,0 Z M44.11,71 a0.89,0.89 0 1,0 1.78,0 a0.89,0.89 0 1,0 -1.78,0 Z M43.97,76 a1.03,1.03 0 1,0 2.06,0 a1.03,1.03 0 1,0 -2.06,0 Z M43.86,81 a1.14,1.14 0 1,0 2.28,0 a1.14,1.14 0 1,0 -2.28,0 Z M43.78,86 a1.22,1.22 0 1,0 2.44,0 a1.22,1.22 0 1,0 -2.44,0 Z M49.59,61 a0.41,0.41 0 1,0 0.82,0 a0.41,0.41 0 1,0 -0.82,0 Z M49.43,66 a0.57,0.57 0 1,0 1.14,0 a0.57,0.57 0 1,0 -1.14,0 Z M49.29,71 a0.71,0.71 0 1,0 1.42,0 a0.71,0.71 0 1,0 -1.42,0 Z M49.17,76 a0.83,0.83 0 1,0 1.66,0 a0.83,0.83 0 1,0 -1.66,0 Z M49.07,81 a0.93,0.93 0 1,0 1.86,0 a0.93,0.93 0 1,0 -1.86,0 Z M49.0,86 a1.0,1.0 0 1,0 2.0,0 a1.0,1.0 0 1,0 -2.0,0 Z M54.61,66 a0.39,0.39 0 1,0 0.78,0 a0.39,0.39 0 1,0 -0.78,0 Z M54.48,71 a0.52,0.52 0 1,0 1.04,0 a0.52,0.52 0 1,0 -1.04,0 Z M54.37,76 a0.63,0.63 0 1,0 1.26,0 a0.63,0.63 0 1,0 -1.26,0 Z M54.28,81 a0.72,0.72 0 1,0 1.44,0 a0.72,0.72 0 1,0 -1.44,0 Z M54.22,86 a0.78,0.78 0 1,0 1.56,0 a0.78,0.78 0 1,0 -1.56,0 Z" fill="#fff" fill-opacity="0.22"/>
+<path d="M38,30 H62 A12,12 0 0 1 74,42 V50 A12,12 0 0 1 62,62 H46 L30,74 L38,62 A12,12 0 0 1 26,50 V42 A12,12 0 0 1 38,30 Z" fill="#fff"/>
+<path d="M34,40 H66" stroke="#A5B4FC" stroke-width="4.2" stroke-linecap="round"/><path d="M34,47 H62" stroke="#A5B4FC" stroke-width="4.2" stroke-linecap="round"/><path d="M34,54 H52" stroke="#A5B4FC" stroke-width="4.2" stroke-linecap="round"/>
+<g clip-path="url(#klens)"><path d="M45.5,52 a14.5,14.5 0 1,0 29.0,0 a14.5,14.5 0 1,0 -29.0,0 Z" fill="#E0F7FF"/><path d="M34,40 H66" stroke="#7C3AED" stroke-width="4.2" stroke-linecap="round"/><path d="M34,47 H62" stroke="#7C3AED" stroke-width="4.2" stroke-linecap="round"/><path d="M34,54 H52" stroke="#7C3AED" stroke-width="4.2" stroke-linecap="round"/></g>
+<path d="M70.5,62.5 L78,70" stroke="#F472B6" stroke-width="7" stroke-linecap="round"/>
+<path d="M45.5,52 a14.5,14.5 0 1,0 29.0,0 a14.5,14.5 0 1,0 -29.0,0 Z" fill="none" stroke="#22D3EE" stroke-width="4.6"/></g></g>
+<text x="500" y="290" fill="#fff" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="96" font-weight="800" letter-spacing="-2">Manga<tspan fill="#22D3EE">Lens</tspan></text>
+<text x="504" y="348" fill="#E0E7FF" font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="27" font-weight="500">Tradução de mangá em tempo real, direto no seu leitor</text>
+<g font-family="Inter, 'Segoe UI', Roboto, Arial, sans-serif" font-size="22" font-weight="600" fill="#fff">
+  <rect x="504" y="396" width="214" height="46" rx="23" fill="#ffffff" fill-opacity="0.12"/><text x="611" y="426" text-anchor="middle">OCR no aparelho</text>
+  <rect x="732" y="396" width="214" height="46" rx="23" fill="#ffffff" fill-opacity="0.12"/><text x="839" y="426" text-anchor="middle">IA gratuita</text>
+  <rect x="960" y="396" width="214" height="46" rx="23" fill="#ffffff" fill-opacity="0.12"/><text x="1067" y="426" text-anchor="middle">Cache por balão</text>
+</g>
+</svg>

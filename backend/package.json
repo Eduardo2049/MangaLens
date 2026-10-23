@@ -2,7 +2,7 @@
   "name": "mangalens-translation-backend",
   "private": true,
   "version": "1.0.0",
-  "description": "Backend proxy for MangaLens Gemini translation requests",
+  "description": "Backend proxy that keeps the OpenRouter key off the MangaLens APK",
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test"

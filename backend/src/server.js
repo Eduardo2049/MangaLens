@@ -1,15 +1,18 @@
 const http = require("node:http");
 const fs = require("node:fs");
+const path = require("node:path");
 const crypto = require("node:crypto");
 
 const DEFAULT_PORT = 8080;
-const DEFAULT_MODEL = "gemini-3.8-flash";
-const MAX_IMAGE_BASE64_LENGTH = 12 * 1024 * 1024;
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 30;
+// OpenRouter free tier allows 20 requests/minute; stay just below it.
+const RATE_LIMIT_MAX_REQUESTS = 18;
+const PASSTHROUGH_HEADERS = ["retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"];
 
 function loadDotEnv() {
-  const envPath = require("node:path").join(__dirname, "..", ".env");
+  const envPath = path.join(__dirname, "..", ".env");
   if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
@@ -17,92 +20,46 @@ function loadDotEnv() {
   }
 }
 
-function createPrompt(sourceLanguage, targetLanguage) {
-  const source = sourceLanguage === "auto" ? "Detect automatically" : sourceLanguage;
-  return `You are a high-precision OCR and visual translator for manga, manhwa, and webtoons.
-Analyze the image and find every readable text region, including speech bubbles, narration, sound effects, and vertical text.
-Translate from ${source} to ${targetLanguage}.
-Return only valid JSON with this exact shape: {"overlays":[{"originalText":"...","translatedText":"...","yMin":0,"xMin":0,"yMax":0,"xMax":0,"isVertical":false,"bubbleType":"SPEECH"}]}.
-Coordinates must be integers from 0 to 100 and represent percentages of the image dimensions.`;
+/** Only free models may pass, so a misconfigured app can never spend credits. */
+function isFreeModel(model) {
+  return typeof model === "string" && (model.endsWith(":free") || model === "openrouter/free");
 }
 
-function extractJson(text) {
-  const trimmed = String(text || "").trim();
-  const start = Math.min(...[trimmed.indexOf("["), trimmed.indexOf("{")].filter((index) => index >= 0));
-  if (start === Infinity) throw new Error("Gemini returned no JSON payload");
-  const end = Math.max(trimmed.lastIndexOf("]"), trimmed.lastIndexOf("}"));
-  if (end <= start) throw new Error("Gemini returned incomplete JSON");
-  return JSON.parse(trimmed.slice(start, end + 1));
+function validateChatRequest(payload) {
+  if (!payload || typeof payload !== "object") throw new Error("invalid JSON body");
+  if (!Array.isArray(payload.messages) || payload.messages.length === 0) throw new Error("messages are required");
+  const models = payload.models || (payload.model ? [payload.model] : []);
+  if (!Array.isArray(models) || models.length === 0) throw new Error("models are required");
+  const blocked = models.filter((model) => !isFreeModel(model));
+  if (blocked.length > 0) throw new Error(`invalid model (only free models allowed): ${blocked.join(", ")}`);
+  return { ...payload, models, model: undefined };
 }
 
-function normalizeOverlays(payload) {
-  const overlays = Array.isArray(payload) ? payload : payload.overlays || payload.items || payload.textRegions;
-  if (!Array.isArray(overlays)) throw new Error("Gemini returned an invalid overlays payload");
-
-  return overlays.flatMap((item) => {
-    const originalText = String(item.originalText || item.text || "").trim();
-    const translatedText = String(item.translatedText || item.translation || "").trim();
-    if (!originalText || !translatedText) return [];
-
-    const clamp = (value, fallback) => {
-      const number = Number(value);
-      return Number.isFinite(number) ? Math.min(100, Math.max(0, number)) : fallback;
-    };
-    const yMin = clamp(item.yMin, 0);
-    const xMin = clamp(item.xMin, 0);
-    const yMax = Math.max(yMin, clamp(item.yMax, yMin + 10));
-    const xMax = Math.max(xMin, clamp(item.xMax, xMin + 15));
-
-    return [{
-      originalText,
-      translatedText,
-      yMin,
-      xMin,
-      yMax,
-      xMax,
-      isVertical: Boolean(item.isVertical),
-      bubbleType: String(item.bubbleType || "SPEECH")
-    }];
-  });
-}
-
-async function translateImage({ imageBase64, sourceLanguage, targetLanguage }, options = {}) {
-  const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-  const model = options.model || process.env.GEMINI_MODEL || DEFAULT_MODEL;
+async function forwardChat(payload, options = {}) {
+  const apiKey = options.apiKey || process.env.OPENROUTER_API_KEY;
   const fetchImpl = options.fetchImpl || fetch;
+  if (!apiKey || apiKey === "MY_OPENROUTER_API_KEY") throw new Error("OPENROUTER_API_KEY is not configured");
 
-  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") throw new Error("GEMINI_API_KEY is not configured");
-  if (typeof imageBase64 !== "string" || imageBase64.length === 0 || imageBase64.length > MAX_IMAGE_BASE64_LENGTH) {
-    throw new Error("imageBase64 must be a non-empty image smaller than 9 MB");
+  const response = await fetchImpl(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+      "x-title": "MangaLens"
+    },
+    body: JSON.stringify(validateChatRequest(payload))
+  });
+  const headers = {};
+  for (const name of PASSTHROUGH_HEADERS) {
+    const value = response.headers.get(name);
+    if (value) headers[name] = value;
   }
-  if (typeof targetLanguage !== "string" || !targetLanguage.trim()) throw new Error("targetLanguage is required");
-
-  const response = await fetchImpl(
-    `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: createPrompt(sourceLanguage || "auto", targetLanguage) },
-            { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }
-          ]
-        }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.2 }
-      })
-    }
-  );
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message || `Gemini returned HTTP ${response.status}`);
-
-  const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
-  return normalizeOverlays(extractJson(text));
+  return { status: response.status, headers, body: await response.text() };
 }
 
 function createServer(options = {}) {
   const requestCounts = new Map();
-  const translate = options.translate || translateImage;
+  const forward = options.forward || forwardChat;
 
   return http.createServer(async (request, response) => {
     const requestId = crypto.randomUUID();
@@ -110,40 +67,45 @@ function createServer(options = {}) {
     const logResult = (status, message) => {
       console.log(`[${requestId}] ${request.method} ${request.url} -> ${status} (${Date.now() - startedAt}ms)${message ? ` ${message}` : ""}`);
     };
+    const sendJson = (status, body, headers = {}) =>
+      response.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
+
     response.setHeader("x-request-id", requestId);
-    response.setHeader("access-control-allow-origin", options.allowedOrigin || "*");
-    response.setHeader("access-control-allow-headers", "content-type");
-    response.setHeader("access-control-allow-methods", "POST, GET, OPTIONS");
-    if (request.method === "OPTIONS") return response.writeHead(204).end();
     if (request.url === "/health" && request.method === "GET") {
       logResult(200);
-      return response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
+      return sendJson(200, { ok: true });
     }
-    if (request.url !== "/v1/translate" || request.method !== "POST") {
+    if (request.url !== "/v1/chat/completions" || request.method !== "POST") {
       logResult(404, "route-not-found");
-      return response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "Not found" }));
+      return sendJson(404, { error: { message: "Not found" } });
     }
 
     const address = request.socket.remoteAddress || "unknown";
     const now = Date.now();
     const recent = (requestCounts.get(address) || []).filter((timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS);
     if (recent.length >= RATE_LIMIT_MAX_REQUESTS) {
-      logResult(429, "rate-limit");
-      return response.writeHead(429, { "content-type": "application/json" }).end(JSON.stringify({ error: "Rate limit exceeded", requestId }));
+      const retryAfter = Math.ceil((RATE_LIMIT_WINDOW_MS - (now - recent[0])) / 1000);
+      logResult(429, "local-rate-limit");
+      return sendJson(429, { error: { code: 429, message: "Rate limit exceeded", requestId } }, { "retry-after": String(retryAfter) });
     }
     requestCounts.set(address, [...recent, now]);
 
     try {
       const chunks = [];
-      for await (const chunk of request) chunks.push(chunk);
+      let size = 0;
+      for await (const chunk of request) {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) throw new Error("invalid request: body too large");
+        chunks.push(chunk);
+      }
       const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      const overlays = await translate(payload, options.translateOptions);
-      logResult(200, `overlays=${overlays.length}`);
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ overlays, requestId }));
+      const result = await forward(payload, options.forwardOptions);
+      logResult(result.status, `models=${(payload.models || [payload.model]).join(",")}`);
+      response.writeHead(result.status, { "content-type": "application/json", ...result.headers }).end(result.body);
     } catch (error) {
-      const status = /required|configured|imageBase64|invalid|smaller/.test(error.message) ? 400 : 502;
+      const status = /required|configured|invalid|JSON/.test(error.message) ? 400 : 502;
       console.error(`[${requestId}] ${request.method} ${request.url} failed: ${error.stack || error.message}`);
-      response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: error.message, requestId }));
+      sendJson(status, { error: { message: error.message, requestId } });
     }
   });
 }
@@ -154,4 +116,4 @@ if (require.main === module) {
   createServer().listen(port, "0.0.0.0", () => console.log(`MangaLens backend listening on port ${port}`));
 }
 
-module.exports = { createServer, extractJson, normalizeOverlays, translateImage };
+module.exports = { createServer, forwardChat, isFreeModel, validateChatRequest };

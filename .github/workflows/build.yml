@@ -88,7 +88,7 @@ jobs:
             ```
 
             ### Configuração obrigatória
-            O APK chama o backend MangaLens. Configure `GEMINI_API_KEY` apenas no ambiente do backend.
+            O APK chama o backend MangaLens. Configure `OPENROUTER_API_KEY` apenas no ambiente do backend.
             Veja o README para instruções completas.
           files: |
             app/build/outputs/apk/debug/app-debug.apk

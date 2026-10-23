@@ -1,15 +1,11 @@
 <div align="center">
 
-# MangaLens
-
-**Tradutor visual de mangás em tempo real para Android**
-
-*Traduza mangás, manhuas e webtoons diretamente sobre o leitor, sem sair da leitura — powered by Gemini AI*
+<img src="assets/cover.svg" alt="MangaLens — tradução de mangá em tempo real, direto no seu leitor" width="100%" />
 
 ![Platform](https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)
-![Gemini](https://img.shields.io/badge/Gemini%203.8%20Flash-API-8E75B2?style=flat-square&logo=google&logoColor=white)
+![OpenRouter](https://img.shields.io/badge/OpenRouter-modelos%20free-6566F1?style=flat-square)
 ![License](https://img.shields.io/badge/Licença-MIT-22C55E?style=flat-square)
 
 </div>
@@ -18,55 +14,101 @@
 
 ## O que é
 
-MangaLens é uma **lupa de tradução flutuante** para mangás, manhuas e webtoons. O aplicativo funciona sobre leitores Android como Mihon, Tachiyomi, Komikku e Kotatsu, captura a tela via `MediaProjection` e desenha os overlays traduzidos sobre os balões.
-
-O app utiliza um backend próprio para proteger a `GEMINI_API_KEY`. A chave nunca é empacotada no APK.
+MangaLens é uma **lupa de tradução flutuante** para mangás, manhwas e webtoons. Funciona sobre leitores Android como Mihon, Tachiyomi, Komikku e Kotatsu: captura a tela via `MediaProjection` e desenha as traduções por cima dos balões.
 
 ### Como funciona
 
 ```text
 Você lê no seu app favorito
-    |
-  | MangaLens captura a tela via MediaProjection
-    v
-Backend MangaLens recebe a imagem e os idiomas
-    |
-  | A key permanece somente no servidor
-    v
-Gemini 3.8 Flash analisa e traduz a imagem
-  |
-  v
-MangaLens posiciona os overlays sobre os balões
+   |
+   | 3x por segundo: miniatura 36x64 da tela (sem rede, sem custo)
+   v
+A tela parou em conteúdo novo?  -- não --> não faz nada
+   | sim
+   v
+OCR no aparelho (ML Kit) encontra os textos e a posição exata de cada balão
+   |
+   | balões já traduzidos vêm do cache (sem custo)
+   v
+Só os textos NOVOS vão para a OpenRouter, em uma única requisição de texto
+   |
+   v
+Traduções desenhadas sobre os balões, com fonte ajustada ao tamanho de cada um
 ```
 
-O nome exato do modelo interno usado pelo Google Lens não é público. O projeto utiliza o modelo multimodal público estável `gemini-3.8-flash`.
+A **posição** de cada tradução vem sempre do OCR (modelos de IA gratuitos erram coordenadas). Com o motor "OCR + IA vendo a imagem" (Configurações), a página também é enviada como imagem para o modelo corrigir erros do OCR e ler texto vertical — mais preciso, porém mais lento.
+
+### Por que é econômico
+
+| Situação | Custo |
+|---|---|
+| Tela parada (você lendo) | Zero — nenhum frame novo, nenhum processamento |
+| Rolando a página | Zero — só compara miniaturas |
+| Página sem texto | Zero — o OCR local não acha texto, nada é enviado |
+| Balão que já foi traduzido (rolar webtoon, voltar página) | Zero — cache |
+| Balões novos | 1 requisição **só de texto** por tela |
+
+A versão anterior reenviava a tela inteira como imagem a cada ~5 s, porque os próprios overlays e a bolha flutuante apareciam na captura e faziam a tela parecer "diferente". Isso foi eliminado: as regiões desenhadas pelo MangaLens são ignoradas na detecção de mudança.
 
 ## Funcionalidades
 
 | Feature | Descrição |
 |---|---|
-| 🔍 **OCR + tradução visual** | Detecta texto em balões, narrações, efeitos sonoros e blocos verticais. |
-| 🔄 **Tradução automática** | Um único botão ativa a captura e o monitoramento da tela. |
-| ⏱️ **Espera inteligente** | Aguarda a tela ficar parada por aproximadamente 2 segundos antes de traduzir. |
-| 🪟 **Overlay flutuante** | Funciona sobre o leitor atual sem importar o mangá. |
-| 🧠 **Cache de frames** | Evita reenviar a mesma tela repetidamente. |
-| 📋 **Copiar tradução** | Toque no overlay para copiar o texto traduzido. |
-| 📚 **Histórico local** | Armazena traduções recentes no dispositivo. |
-| 🔐 **Backend protegido** | A chave Gemini permanece fora do aplicativo Android. |
+| 🔍 **OCR no aparelho** | ML Kit (latim, japonês, coreano, chinês) — posições exatas, sem rede. |
+| 🌐 **Tradução contextual** | Os balões da página vão juntos, com as últimas falas como contexto (nomes, gênero, tom). |
+| 🆓 **OpenRouter grátis** | Usa apenas modelos `:free`, com fallback automático entre eles. |
+| ⏱️ **Espera inteligente** | Traduz quando a tela fica parada ~0,4 s em conteúdo novo. |
+| ⚡ **Balões progressivos** | A resposta da IA chega em streaming: cada balão aparece assim que é traduzido, sem esperar a página inteira. |
+| 🧠 **Cache** | Por balão (OCR mode) e por página (modo visão). |
+| 🚦 **Limites respeitados** | Espaça requisições (20/min), conta o uso diário e respeita o `Retry-After` de um 429. |
+| 🪟 **Overlay que não atrapalha** | Uma única camada que ignora toques: o leitor continua rolando normalmente. |
+| 🔐 **Backend opcional** | Proxy que guarda a chave fora do APK e só aceita modelos gratuitos. |
 
-## Fluxo de ativação
+## Usando a bolha flutuante
 
-Toque em **Ativar tradução automática**, conceda as permissões de sobreposição e captura de tela e selecione o idioma de destino em Configurações. Ao abrir uma página, o MangaLens limpa os overlays antigos durante a rolagem e envia a nova tela somente quando ela permanece estável.
+| Gesto | Ação |
+|---|---|
+| Arrastar | Move a bolha |
+| Tocar | Liga/pausa a tradução automática (no modo Manual: traduz a tela / esconde a tradução) |
+| Segurar ~0,5 s | Força uma nova tradução da tela atual |
+| ✖ | Encerra o tradutor |
 
-O botão principal funciona como um interruptor: ao desativar, o serviço e todos os overlays são removidos.
+Estados: `AUTO ●` (ativo), `AGUARDANDO...` (tela em movimento), `LENDO...` (OCR), `TRADUZINDO...` (API), `LIMITE ⏳` (limite da API — tenta de novo sozinho), `ERRO ●` (segure para tentar de novo). A notificação mostra quantas requisições foram usadas hoje.
+
+Em **Configurações** escolha o modo (Automático/Manual) e o motor (OCR + texto, ou IA lê a imagem).
+
+## Configurar a OpenRouter (teste pessoal)
+
+1. Crie uma conta e uma chave em [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
+2. Adicione ao `local.properties` (já ignorado pelo Git — a chave **nunca** vai para o repositório):
+
+```properties
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+3. Gere e instale o APK (abaixo). Com a chave definida o app chama a OpenRouter direto — não precisa de backend nem de PC ligado.
+
+Opcional no mesmo arquivo:
+
+```properties
+# Modelos em ordem de preferência (todos gratuitos, no máximo 3: limite da OpenRouter). A lista de modelos free muda com o tempo:
+# https://openrouter.ai/models?max_price=0
+OPENROUTER_TEXT_MODELS=dots-studio/dots-3-note-preview:free,nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-3-ultra-550b-a55b:free
+OPENROUTER_VISION_MODELS=nvidia/nemotron-3.5-super-vl:free,dots-studio/dots-3-note-preview:free,google/gemma-4-31b-it:free
+# Limite diário que o app impõe a si mesmo (free: 50/dia; 1000/dia após comprar 10 créditos uma vez)
+OPENROUTER_DAILY_LIMIT=50
+```
+
+> **Limites do plano gratuito:** 20 requisições/minuto e **50 por dia** sem créditos (1000/dia depois de comprar US$ 10 em créditos uma única vez). Graças ao cache, uma leitura típica gasta 1 requisição por tela com falas novas. Quando o limite diário acaba, os balões já traduzidos continuam aparecendo.
+
+> A chave embutida no APK só serve para uso pessoal: qualquer pessoa com o APK consegue extraí-la. Para distribuir, use o backend.
 
 ## Requisitos
 
 - JDK 17 completo.
 - Android SDK 35.
 - Android 7.0 / API 24 ou superior.
-- Node.js 18 ou superior para o backend local.
-- Celular e computador na mesma rede quando usar um aparelho físico.
+- Node.js 18+ apenas se for usar o backend.
 
 ## Corrigir o JDK no VS Code
 
@@ -89,226 +131,83 @@ Os dois comandos devem mostrar Java 17. Depois execute `Developer: Reload Window
 
 O arquivo `.vscode/settings.json` usa `${env:JAVA_HOME}` para que o projeto não dependa de um caminho absoluto de outra máquina.
 
-## Testar no computador
-
-### 1. Testar o backend
-
-Em um terminal PowerShell:
-
-```powershell
-cd backend
-Copy-Item .env.example .env
-# Edite .env e informe GEMINI_API_KEY
-npm test
-npm start
-```
-
-Em outro terminal, confirme que o servidor está vivo:
-
-```powershell
-Invoke-RestMethod http://localhost:8080/health
-```
-
-O resultado esperado contém `ok: true`. A chamada real de tradução exige uma key válida e uma imagem; os testes automatizados usam uma resposta simulada.
-
-Enquanto o backend estiver rodando, cada chamada produz um log semelhante a:
-
-```text
-[request-id] POST /v1/translate -> 200 (1850ms) overlays=3
-```
-
-Em caso de erro, o backend registra a stack trace com o mesmo `request-id` e devolve esse identificador ao Android. Assim, o texto exibido no app pode ser relacionado diretamente ao erro no terminal. Não são registrados a chave Gemini nem o conteúdo da imagem.
-
-Se aparecer `EADDRINUSE ... 8080`, já existe um backend rodando. Use-o, consulte `/health` ou encerre o processo anterior antes de executar `npm start` novamente.
-
-### 2. Testar o Android no emulador
-
-Com o backend rodando, confirme que existe um emulador Android iniciado e conectado:
-
-```powershell
-adb devices
-```
-
-Se `adb` não for reconhecido, configure o Android SDK nesta sessão do PowerShell:
-
-```powershell
-$env:ANDROID_HOME="C:\Users\eduardo.asousa\AppData\Local\Android\Sdk"
-$env:Path="$env:ANDROID_HOME\platform-tools;$env:ANDROID_HOME\emulator;$env:Path"
-adb version
-```
-
-Para manter essa configuração em novas sessões, adicione `platform-tools` às variáveis de ambiente do Windows ou abra o terminal pelo Android Studio.
-
-Gere e instale o APK apontando para o host do emulador:
-
-```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
-.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://10.0.2.2:8080
-adb install -r app\build\outputs\apk\debug\app-debug.apk
-```
-
-No app:
-
-1. Toque em **Ativar tradução automática**.
-2. Conceda **Exibir sobre outros apps**.
-3. Autorize a captura de tela.
-4. Abra uma página de mangá com texto dentro do emulador.
-5. Aguarde a captura automática e confirme os overlays traduzidos.
-6. Toque em um overlay e confirme que o texto é copiado.
-7. Toque novamente no botão principal e confirme que o serviço e os overlays desaparecem.
-
-### 3. Observar logs
-
-Para investigar falhas de conexão ou permissão:
-
-```powershell
-adb logcat -c
-adb logcat | Select-String "MangaLens|GeminiTranslator|AndroidRuntime"
-```
-
-Mensagens `HTTP 400` ou `HTTP 502` normalmente indicam configuração do backend, key ou cota. Mensagens de permissão indicam que a captura ou a sobreposição ainda não foi autorizada.
-
-### 4. Testar em celular físico
-
-Use o IPv4 do computador na mesma rede Wi-Fi do celular e gere outro APK:
-
-```powershell
-ipconfig
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
-.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://192.168.1.100:8080
-adb install -r app\build\outputs\apk\debug\app-debug.apk
-```
-
-Troque `192.168.1.100` pelo IPv4 correto. Libere a porta TCP 8080 no firewall do Windows se o endpoint `/health` não puder ser acessado pelo celular.
-
-## Backend local
-
-O backend mantém a chave Gemini fora do APK.
-
-### Windows PowerShell
-
-```powershell
-cd backend
-Copy-Item .env.example .env
-# Edite backend/.env e substitua MY_GEMINI_API_KEY pela sua chave
-npm test
-npm start
-```
-
-Verifique o servidor em `http://localhost:8080/health`.
-
-Crie a chave em [Google AI Studio](https://aistudio.google.com/apikey). Nunca coloque essa chave em arquivos do Android ou no APK.
-
-### Emulador Android
-
-O valor padrão do Android é `http://10.0.2.2:8080`. Esse endereço aponta para o computador host a partir do emulador.
-
-### Celular físico
-
-1. Execute `ipconfig` e copie o IPv4 do computador.
-2. Inicie o backend com `npm start`.
-3. Libere a porta TCP 8080 no firewall, se necessário.
-4. Gere o APK apontando para o IPv4:
-
-```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
-.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://192.168.1.100:8080
-```
-
-Troque `192.168.1.100` pelo endereço real do computador.
-
-## Gerar APK para testes
-
-### Windows PowerShell
+## Gerar e instalar o APK
 
 ```powershell
 $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 .\gradlew.bat :app:testDebugUnitTest
-.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://10.0.2.2:8080
-```
-
-O arquivo será gerado em:
-
-`app/build/outputs/apk/debug/app-debug.apk`
-
-Para instalar em um dispositivo conectado:
-
-```powershell
+.\gradlew.bat :app:assembleDebug
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Para instalar no emulador, mantenha o backend rodando em `localhost:8080`. Para um celular físico, gere novamente usando o IP da máquina.
+Ou, com o celular conectado: `.\gradlew.bat installDebug`.
 
-### Android Studio
+No app:
 
-1. Abra o projeto.
-2. Configure o JDK 17.
-3. Execute `app > Tasks > build > assembleDebug`.
-4. Instale `app-debug.apk` no dispositivo.
+1. Toque em **Ativar tradução automática**.
+2. Conceda **Exibir sobre outros apps** e autorize a captura de tela (escolha "Tela inteira").
+3. Abra o leitor de mangá. Ao parar numa página, a bolha mostra `LENDO...` → `TRADUZINDO...` → `AUTO ●` e as traduções aparecem.
+4. Role a página: as traduções somem durante a rolagem e voltam ao parar (balões já vistos voltam instantaneamente, sem custo).
 
-## Configurar outro backend
+Para testar sem outro app: na tela inicial, importe uma imagem de mangá — ela passa pelo mesmo pipeline.
 
-Passe a URL no Gradle:
+### Observar logs
 
 ```powershell
-.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=https://seu-backend.example.com
+adb logcat -c
+adb logcat | Select-String "MangaLens|AndroidRuntime"
 ```
 
-O backend precisa expor:
+Cada tradução registra o tempo do OCR e da API, e cada requisição `model=... tokens=...`, e cada página `Página: N traduções, requests=0|1, cache=true|false`.
+
+## Backend (opcional)
+
+Sem `OPENROUTER_API_KEY` no `local.properties`, o app usa o backend em `TRANSLATION_API_BASE_URL` (padrão `http://10.0.2.2:8080`, o host visto pelo emulador). O backend é um proxy fino para a OpenRouter: injeta a chave e **recusa modelos pagos**.
+
+```powershell
+cd backend
+Copy-Item .env.example .env
+# Edite backend/.env e informe OPENROUTER_API_KEY
+npm test
+npm start
+```
+
+Verifique em `http://localhost:8080/health`. Para celular físico, use o IPv4 do computador (mesma rede Wi-Fi) e libere a porta TCP 8080 no firewall:
+
+```powershell
+.\gradlew.bat :app:assembleDebug -PTRANSLATION_API_BASE_URL=http://192.168.1.100:8080
+```
+
+O build debug permite HTTP sem TLS para esse backend local; o release não.
+
+Endpoints:
 
 - `GET /health`
-- `POST /v1/translate`
-
-O corpo de `POST /v1/translate` é:
-
-```json
-{
-  "imageBase64": "...",
-  "sourceLanguage": "ja",
-  "targetLanguage": "pt"
-}
-```
-
-A resposta esperada é:
-
-```json
-{
-  "overlays": [
-    {
-      "originalText": "...",
-      "translatedText": "...",
-      "yMin": 10,
-      "xMin": 20,
-      "yMax": 30,
-      "xMax": 80,
-      "isVertical": false,
-      "bubbleType": "SPEECH"
-    }
-  ]
-}
-```
+- `POST /v1/chat/completions` — corpo no formato OpenAI/OpenRouter (`models`, `messages`, ...); somente modelos `:free` ou `openrouter/free`.
 
 ## Estrutura
 
 ```text
-app/                         Aplicativo Android
-backend/src/server.js        Proxy HTTP para Gemini
-backend/test/                Testes do backend
-backend/.env.example         Configuração do backend sem segredo real
+app/src/main/java/com/example/
+  service/MangaOverlayService.kt      Bolha flutuante + loop de detecção de mudança
+  service/ScreenCaptureManager.kt     MediaProjection; frames convertidos só sob demanda
+  service/TranslationOverlayLayer.kt  Camada única de traduções (não intercepta toques)
+  translation/                        OCR, cache, prompts, orçamento de requisições, pipeline
+  data/remote/OpenRouterClient.kt     Cliente OpenRouter (fallback de modelos, 429)
+backend/src/server.js                 Proxy OpenRouter (opcional)
 ```
-
-## CI/CD
-
-O workflow do GitHub Actions executa os testes e gera o APK debug como artifact. A chave Gemini não é necessária para compilar o Android; ela deve ser configurada somente no ambiente onde o backend for hospedado.
 
 ## Troubleshooting
 
 | Problema | Solução |
 |---|---|
-| Backend não responde | Execute `npm start` em `backend/` e verifique `/health`. |
-| Emulador não conecta | Use `http://10.0.2.2:8080`. |
-| Celular não conecta | Use o IPv4 do computador e libere TCP 8080 no firewall. |
-| `ERRO NA API` | Confira o backend, a cota e `backend/.env`. |
+| `Configure OPENROUTER_API_KEY` | Adicione a chave ao `local.properties` e gere o APK de novo. |
+| `LIMITE ⏳` | Limite por minuto/dia da OpenRouter. Aguarde; o app tenta sozinho. |
+| `ERRO ●` com "OpenRouter: ..." | Modelo indisponível: troque `OPENROUTER_TEXT_MODELS` por modelos free atuais. |
+| Nada é traduzido | Confira se a captura é "Tela inteira" e se o idioma de origem está certo (ou "Detectar"). |
+| Texto lido errado (OCR) ou mangá vertical | Use o motor "OCR + IA vendo a imagem" nas Configurações. |
+| Tradução lenta | Veja no logcat `OCR: ... ms` e `API: ... ms` para saber qual etapa demora; modelos free variam de velocidade, ajuste `OPENROUTER_TEXT_MODELS`. |
+| Backend não conecta | `npm start` em `backend/`, `/health`, IPv4 correto e firewall. |
 | APK não compila | Confirme JDK 17 e Android SDK 35. |
 
 ## Licença

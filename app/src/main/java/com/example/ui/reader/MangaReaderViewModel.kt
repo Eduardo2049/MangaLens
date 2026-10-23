@@ -12,10 +12,12 @@ import com.example.data.local.UserPreferences
 import com.example.data.local.UserPreferencesRepository
 import com.example.data.model.SupportedLanguage
 import com.example.data.model.TextOverlay
+import com.example.data.model.BoundingBox
+import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
-import com.example.data.remote.GeminiVisualTranslator
 import com.example.data.samples.MangaChapterSample
 import com.example.data.samples.SampleMangaData
+import com.example.translation.TranslationPipeline
 import kotlinx.coroutines.Job
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
@@ -52,7 +54,7 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     private val historyDao = db.translationHistoryDao()
     private val prefsRepo = UserPreferencesRepository(application)
-    private val visualTranslator = GeminiVisualTranslator()
+    private val pipeline = TranslationPipeline(application)
 
     private val _uiState = MutableStateFlow(MangaUiState())
     val uiState: StateFlow<MangaUiState> = _uiState.asStateFlow()
@@ -63,9 +65,14 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         // Observe preferences
         viewModelScope.launch {
             prefsRepo.preferences.collectLatest { prefs ->
+                val previous = _uiState.value.userPreferences
                 _uiState.value = _uiState.value.copy(userPreferences = prefs)
-                // Refresh overlays when source/target languages change
-                loadActiveOverlays()
+                // Re-translate only when something that affects the result changed (not opacity/font size),
+                // otherwise dragging a slider would fire one API request per step.
+                val translationChanged = previous.sourceLanguage != prefs.sourceLanguage ||
+                    previous.targetLanguage != prefs.targetLanguage ||
+                    previous.translationEngine != prefs.translationEngine
+                if (translationChanged) loadActiveOverlays()
             }
         }
 
@@ -121,29 +128,39 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
             val bitmapToProcess = _uiState.value.customBitmap
 
             if (bitmapToProcess != null) {
-                val result = visualTranslator.translateMangaImage(
-                    bitmap = bitmapToProcess,
-                    sourceLang = prefs.sourceLanguage,
-                    targetLang = prefs.targetLanguage
-                )
+                val result = pipeline.translate(bitmapToProcess, prefs)
+                val width = bitmapToProcess.width.toFloat()
+                val height = bitmapToProcess.height.toFloat()
+                val overlays = result.translations.map {
+                    TextOverlay(
+                        originalText = it.originalText,
+                        translatedText = it.translatedText,
+                        box = BoundingBox(
+                            yMin = it.box.top / height * 100f,
+                            xMin = it.box.left / width * 100f,
+                            yMax = it.box.bottom / height * 100f,
+                            xMax = it.box.right / width * 100f
+                        ),
+                        isVertical = it.isVertical,
+                        bubbleType = it.bubbleType
+                    )
+                }
+                val error = result.error
 
-                result.fold(
-                    onSuccess = { overlays ->
-                        _uiState.value = _uiState.value.copy(
-                            activeOverlays = overlays,
-                            isProcessing = false,
-                            statusMessage = if (overlays.isEmpty()) "Nenhum texto detectado nesta área." else null
-                        )
-                        saveOverlaysToHistory(overlays)
-                    },
-                    onFailure = { err ->
-                        Log.e("MangaViewModel", "Translation failed", err)
-                        _uiState.value = _uiState.value.copy(
-                            isProcessing = false,
-                            statusMessage = "Falha no OCR/Tradução: ${err.localizedMessage}"
-                        )
-                    }
-                )
+                if (error != null && overlays.isEmpty()) {
+                    Log.e("MangaViewModel", "Translation failed", error)
+                    _uiState.value = _uiState.value.copy(
+                        isProcessing = false,
+                        statusMessage = "Falha no OCR/Tradução: ${error.localizedMessage}"
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        activeOverlays = overlays,
+                        isProcessing = false,
+                        statusMessage = if (overlays.isEmpty()) "Nenhum texto detectado nesta área." else null
+                    )
+                    saveOverlaysToHistory(overlays)
+                }
             } else {
                 // Built-in sample panel: simulated dynamic translation update with sample data
                 val chapter = currentChapter
@@ -188,6 +205,10 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     fun setTranslationMode(mode: TranslationMode) {
         prefsRepo.updateTranslationMode(mode)
+    }
+
+    fun setTranslationEngine(engine: TranslationEngine) {
+        prefsRepo.updateTranslationEngine(engine)
     }
 
     fun updateSourceLanguage(lang: SupportedLanguage) {
@@ -237,5 +258,6 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
     override fun onCleared() {
         super.onCleared()
         autoTranslateJob?.cancel()
+        pipeline.close()
     }
 }
