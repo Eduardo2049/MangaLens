@@ -1,3 +1,4 @@
+import java.util.Properties
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
@@ -20,10 +21,33 @@ android {
     targetSdk = 35
     versionCode = 8
     versionName = "0.8"
-    val translationApiBaseUrl = providers.gradleProperty("TRANSLATION_API_BASE_URL")
-      .orElse("http://10.0.2.2:8080")
-      .get()
-    buildConfigField("String", "TRANSLATION_API_BASE_URL", "\"$translationApiBaseUrl\"")
+    // Local-only settings: local.properties (git-ignored) > -P gradle property > environment variable.
+    val localProps = Properties().apply {
+      val content = providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+        .asText.orNull
+      if (content != null) load(content.reader())
+    }
+    fun localSetting(name: String, default: String): String =
+      localProps.getProperty(name)?.takeIf { it.isNotBlank() }
+        ?: providers.gradleProperty(name).orNull?.takeIf { it.isNotBlank() }
+        ?: providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
+        ?: default
+    fun buildString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    // When OPENROUTER_API_KEY is set the app calls OpenRouter directly (personal testing).
+    // Otherwise it uses the backend proxy at TRANSLATION_API_BASE_URL, which holds the key.
+    buildConfigField("String", "TRANSLATION_API_BASE_URL", buildString(localSetting("TRANSLATION_API_BASE_URL", "http://10.0.2.2:8080")))
+    buildConfigField("String", "OPENROUTER_API_KEY", buildString(localSetting("OPENROUTER_API_KEY", "")))
+    buildConfigField(
+      "String", "OPENROUTER_TEXT_MODELS",
+      buildString(localSetting("OPENROUTER_TEXT_MODELS", "google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free,openrouter/free"))
+    )
+    buildConfigField(
+      "String", "OPENROUTER_VISION_MODELS",
+      buildString(localSetting("OPENROUTER_VISION_MODELS", "nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,openrouter/free"))
+    )
+    // Free tier: 50 requests/day (1000/day after buying 10 credits once).
+    buildConfigField("int", "OPENROUTER_DAILY_LIMIT", localSetting("OPENROUTER_DAILY_LIMIT", "50").toIntOrNull()?.toString() ?: "50")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -105,6 +129,11 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
+  // On-device OCR: exact text positions for free, so only text (not images) goes to the LLM.
+  implementation(libs.mlkit.text.recognition)
+  implementation(libs.mlkit.text.recognition.japanese)
+  implementation(libs.mlkit.text.recognition.korean)
+  implementation(libs.mlkit.text.recognition.chinese)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)

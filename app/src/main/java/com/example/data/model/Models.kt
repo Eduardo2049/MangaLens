@@ -4,15 +4,17 @@ enum class SupportedLanguage(
     val code: String,
     val displayName: String,
     val flagEmoji: String,
-    val isVerticalDefault: Boolean = false
+    val isVerticalDefault: Boolean = false,
+    /** English name used inside LLM prompts (models follow English instructions more reliably). */
+    val promptName: String = displayName
 ) {
-    AUTO("auto", "Detectar Automático", "🌐"),
-    JAPANESE("ja", "Japonês (日本語)", "🇯🇵", isVerticalDefault = true),
-    KOREAN("ko", "Coreano (한국어)", "🇰🇷"),
-    CHINESE("zh", "Chinês (中文)", "🇨🇳", isVerticalDefault = true),
-    ENGLISH("en", "Inglês (English)", "🇺🇸"),
-    SPANISH("es", "Espanhol (Español)", "🇪🇸"),
-    PORTUGUESE("pt", "Português (Brasil)", "🇧🇷");
+    AUTO("auto", "Detectar Automático", "🌐", promptName = "the original language (detect it: Japanese, Korean, Chinese or English)"),
+    JAPANESE("ja", "Japonês (日本語)", "🇯🇵", isVerticalDefault = true, promptName = "Japanese"),
+    KOREAN("ko", "Coreano (한국어)", "🇰🇷", promptName = "Korean"),
+    CHINESE("zh", "Chinês (中文)", "🇨🇳", isVerticalDefault = true, promptName = "Chinese"),
+    ENGLISH("en", "Inglês (English)", "🇺🇸", promptName = "English"),
+    SPANISH("es", "Espanhol (Español)", "🇪🇸", promptName = "Spanish"),
+    PORTUGUESE("pt", "Português (Brasil)", "🇧🇷", promptName = "Brazilian Portuguese");
 
     companion object {
         fun fromCode(code: String): SupportedLanguage {
@@ -30,7 +32,21 @@ enum class TranslationMode(
     val description: String
 ) {
     DYNAMIC("Dinâmico (Automático)", "Traduz continuamente ao rolar ou mudar de página"),
-    MANUAL("Manual (Sob Demanda)", "Traduz apenas ao tocar no botão de atualizar")
+    MANUAL("Manual (Sob Demanda)", "Traduz apenas ao tocar na bolha flutuante")
+}
+
+enum class TranslationEngine(
+    val title: String,
+    val description: String
+) {
+    OCR_TEXT(
+        "OCR no aparelho + IA no texto",
+        "Mais preciso e econômico: posições exatas e só envia textos novos"
+    ),
+    VISION(
+        "IA lê a imagem",
+        "Melhor para mangá japonês vertical; consome mais da cota"
+    )
 }
 
 data class BoundingBox(

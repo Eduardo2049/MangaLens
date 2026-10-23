@@ -5,7 +5,7 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
 ---
 
 ## 🚀 Contexto do Projeto
-**MangaLens** é um aplicativo Android para tradução de mangás em tempo real usando sobreposição (overlay). O app utiliza o SDK do Gemini para processamento de IA e a API `MediaProjection` do Android para capturar a tela.
+**MangaLens** é um aplicativo Android para tradução de mangás em tempo real usando sobreposição (overlay). O app captura a tela com `MediaProjection`, faz OCR no aparelho (ML Kit) e envia apenas os textos novos para tradução via OpenRouter (modelos gratuitos).
 
 ---
 
@@ -15,7 +15,7 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
 - **Arquitetura:** MVVM + Clean Architecture
 - **Banco de Dados:** Room
 - **Rede:** Retrofit + OkHttp + Moshi
-- **IA:** Google AI SDK (Gemini Multimodal)
+- **IA:** OpenRouter (modelos `:free`) + OCR no aparelho (ML Kit Text Recognition)
 - **Testes:** JUnit, Robolectric, Roborazzi (Screenshot Testing)
 
 ---
@@ -45,6 +45,10 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
    - O arquivo `local.properties` (ignorado pelo Git) deve conter o caminho válido do SDK:
      ```properties
      sdk.dir=C:/Users/eduardo.asousa/AppData/Local/Android/Sdk
+     ```
+   - Para teste pessoal, a chave da OpenRouter também fica aqui (nunca em arquivos rastreados):
+     ```properties
+     OPENROUTER_API_KEY=sk-or-v1-...
      ```
 
 3. **Toolchain Kotlin no `app/build.gradle.kts`:**
@@ -84,6 +88,14 @@ $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 - **Composables:** Devem seguir o padrão de nomes `CamelCase`. Use `modifier: Modifier = Modifier` como primeiro parâmetro opcional.
 - **ViewModels:** Devem usar `StateFlow` para expor estados reativos à UI.
 - **DI:** Injeção manual / simplificada nos serviços e repositórios.
+
+---
+
+## 💸 Regras de Consumo de API
+
+- Nunca dispare requisições em loop: a detecção de mudança (`FrameThumbnail`) deve ignorar as regiões desenhadas pelo próprio app (bolha, cards, status bar).
+- Prefira OCR local + tradução de texto; o modo visão (imagem) só quando necessário.
+- Toda requisição passa pelo `RequestBudget` (20/min, limite diário) e pelos caches (`TextTranslationCache`, `PageCache`).
 
 ---
 
