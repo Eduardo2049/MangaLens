@@ -25,7 +25,7 @@ APP_NAME="Gradle"
 APP_BASE_NAME=`basename "$0"`
 
 # Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
-DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+DEFAULT_JVM_OPTS="-Xmx64m -Xms64m"
 
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD="maximum"
@@ -119,21 +119,4 @@ set -- \
         org.gradle.wrapper.GradleWrapperMain \
         "$@"
 
-# Use "xargs" to parse quoted args.
-#
-# With -n1 it outputs one arg per line, with the option to quote one.
-# Lines with single quotes can be quoted. With eval each arg may be
-# evaluated, too.
-eval "set -- $(
-        printf '%s\n' "$@" |
-        xargs -n1 |
-        sed ' s/[ \t]//g;
-            /^$/ d;
-            s/'"'"'/'"'"\\\\'"'"'"'"'/g;
-            s/.*/"&"/;' |
-        tr '\n' ' '
-    )"
-exec "$JAVA_CMD" "$DEFAULT_JVM_OPTS" $JAVA_OPTS $GRADLE_OPTS \
-    -classpath "$CLASSPATH" \
-    org.gradle.wrapper.GradleWrapperMain \
-    "$@"
+exec "$JAVA_CMD" $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "$@"
