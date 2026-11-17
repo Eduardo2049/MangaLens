@@ -28,18 +28,37 @@ import kotlin.coroutines.resumeWithException
 /** Thrown on HTTP 429; [retryAfterMillis] is when it is worth trying again. */
 class RateLimitedException(val retryAfterMillis: Long, message: String) : Exception(message)
 
+/** Model answer plus the model that actually produced it (OpenRouter may fall back to another one). */
+data class ChatReply(val content: String, val model: String?)
+
+/** Request shape differences between OpenAI-compatible providers. */
+enum class ApiDialect {
+    /** OpenRouter: `models` fallback list and `reasoning` switch. */
+    OPENROUTER,
+    /** Plain OpenAI Chat Completions (also Groq, Together, local servers...): single `model`. */
+    OPENAI
+}
+
 /**
- * OpenAI-compatible chat client for OpenRouter. Talks to OpenRouter directly when an API key is
- * configured (local.properties), otherwise to the MangaLens backend proxy which injects the key.
+ * OpenAI-compatible chat client. Talks to OpenRouter directly when an API key is available (typed in the
+ * app settings or local.properties), otherwise to the MangaLens backend proxy which injects the key.
  * Uses OpenRouter's `models` fallback list so a busy free model falls through to the next one.
  */
 class OpenRouterClient(
-    private val endpoint: String = defaultEndpoint(),
+    /** Fixed endpoint; null = OpenRouter when a key is available, otherwise the backend proxy. */
+    private val endpoint: String? = null,
     private val apiKey: String = BuildConfig.OPENROUTER_API_KEY.trim(),
-    private val httpClient: OkHttpClient = sharedHttpClient
+    private val httpClient: OkHttpClient = sharedHttpClient,
+    private val dialect: ApiDialect = ApiDialect.OPENROUTER
 ) {
 
-    val isConfigured: Boolean get() = endpoint.isNotBlank()
+    val isConfigured: Boolean get() = isConfigured(null)
+
+    fun isConfigured(keyOverride: String?): Boolean = endpointFor(effectiveKey(keyOverride)).isNotBlank()
+
+    private fun effectiveKey(keyOverride: String?) = keyOverride?.trim()?.takeIf { it.isNotEmpty() } ?: apiKey
+
+    private fun endpointFor(key: String): String = endpoint ?: if (key.isNotEmpty()) OPENROUTER_URL else backendEndpoint()
 
     suspend fun complete(
         models: List<String>,
@@ -47,10 +66,15 @@ class OpenRouterClient(
         userText: String,
         image: Bitmap? = null,
         maxTokens: Int = 2048,
+        /** Key typed by the user in the app; overrides the build-time key. */
+        apiKeyOverride: String? = null,
         /** When set, the answer is streamed and this receives the text accumulated so far (IO thread). */
         onText: ((String) -> Unit)? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<ChatReply> = withContext(Dispatchers.IO) {
         try {
+            val key = effectiveKey(apiKeyOverride)
+            val url = endpointFor(key)
+            if (url.isBlank()) throw IllegalStateException("Configure a chave da OpenRouter nas configurações do app")
             val userContent: Any = if (image == null) {
                 userText
             } else {
@@ -64,24 +88,30 @@ class OpenRouterClient(
                     )
             }
             val body = JSONObject()
-                .put("models", JSONArray(models.take(MAX_FALLBACK_MODELS)))
                 .put(
                     "messages", JSONArray()
                         .put(JSONObject().put("role", "system").put("content", systemPrompt))
                         .put(JSONObject().put("role", "user").put("content", userContent))
                 )
                 .put("temperature", 0.3)
-                .put("max_tokens", maxTokens)
                 .put("response_format", JSONObject().put("type", "json_object"))
-                // Thinking adds latency and burns the free quota; translation does not need it.
-                .put("reasoning", JSONObject().put("enabled", false))
                 .put("stream", onText != null)
+            when (dialect) {
+                ApiDialect.OPENROUTER -> body
+                    .put("models", JSONArray(models.take(MAX_FALLBACK_MODELS)))
+                    .put("max_tokens", maxTokens)
+                    // Thinking adds latency and burns the free quota; translation does not need it.
+                    .put("reasoning", JSONObject().put("enabled", false))
+                ApiDialect.OPENAI -> body
+                    .put("model", models.first())
+                    .put("max_completion_tokens", maxTokens)
+            }
 
             val request = Request.Builder()
-                .url(endpoint)
+                .url(url)
                 .header("Content-Type", "application/json")
                 .header("X-Title", "MangaLens")
-                .apply { if (apiKey.isNotEmpty()) header("Authorization", "Bearer $apiKey") }
+                .apply { if (key.isNotEmpty()) header("Authorization", "Bearer $key") }
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -101,11 +131,13 @@ class OpenRouterClient(
                     throw IOException("OpenRouter: $message")
                 }
                 val choice = json?.optJSONArray("choices")?.optJSONObject(0)
-                val content = choice?.optJSONObject("message")?.optString("content").orEmpty()
-                Log.d(TAG, "model=${json?.optString("model")} finish=${choice?.optString("finish_reason")} " +
+                // `content` is JSON null when the model only "thought"; optString would turn that into "null".
+                val content = choice?.optJSONObject("message")?.opt("content") as? String ?: ""
+                val model = json?.optString("model")?.takeIf { it.isNotEmpty() }
+                Log.d(TAG, "model=$model finish=${choice?.optString("finish_reason")} " +
                     "tokens=${json?.optJSONObject("usage")?.optInt("total_tokens")}")
-                if (content.isBlank()) throw IOException("OpenRouter devolveu resposta vazia")
-                content
+                if (content.isBlank()) throw IOException("OpenRouter devolveu resposta vazia (modelo $model)")
+                ChatReply(content, model)
             }
             Result.success(content)
         } catch (e: CancellationException) {
@@ -119,7 +151,7 @@ class OpenRouterClient(
      * Reads an OpenAI-style server-sent-event stream. Lines starting with ":" are OpenRouter keep-alive
      * comments; an `error` object can arrive mid-stream when the provider fails after starting.
      */
-    private suspend fun readStream(response: Response, onText: (String) -> Unit): String {
+    private suspend fun readStream(response: Response, onText: (String) -> Unit): ChatReply {
         val source = response.body?.source() ?: throw IOException("OpenRouter devolveu resposta vazia")
         val text = StringBuilder()
         var model: String? = null
@@ -140,8 +172,8 @@ class OpenRouterClient(
             }
         }
         Log.d(TAG, "model=$model stream chars=${text.length}")
-        if (text.isBlank()) throw IOException("OpenRouter devolveu resposta vazia")
-        return text.toString()
+        if (text.isBlank()) throw IOException("OpenRouter devolveu resposta vazia (modelo $model)")
+        return ChatReply(text.toString(), model)
     }
 
     private fun retryAfterMillis(response: Response): Long {
@@ -174,15 +206,15 @@ class OpenRouterClient(
         private const val TAG = "MangaLens"
         /** OpenRouter rejects a `models` list longer than this. */
         private const val MAX_FALLBACK_MODELS = 3
-        private const val OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+        const val OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+        const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
         val textModels: List<String> = parseModels(BuildConfig.OPENROUTER_TEXT_MODELS)
         val visionModels: List<String> = parseModels(BuildConfig.OPENROUTER_VISION_MODELS)
 
         private fun parseModels(csv: String) = csv.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
-        fun defaultEndpoint(): String {
-            if (BuildConfig.OPENROUTER_API_KEY.isNotBlank()) return OPENROUTER_URL
+        private fun backendEndpoint(): String {
             val backend = BuildConfig.TRANSLATION_API_BASE_URL.trim().trimEnd('/')
             return if (backend.isBlank()) "" else "$backend/v1/chat/completions"
         }

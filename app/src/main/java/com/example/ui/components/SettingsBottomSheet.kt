@@ -27,6 +27,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.SheetState
@@ -45,7 +46,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.UserPreferences
@@ -67,7 +72,8 @@ fun SettingsBottomSheet(
     onUpdateBubbleStyle: (String) -> Unit,
     onUpdateReadingMode: (String) -> Unit,
     onUpdateTranslationMode: (TranslationMode) -> Unit = {},
-    onUpdateTranslationEngine: (TranslationEngine) -> Unit = {}
+    onUpdateTranslationEngine: (TranslationEngine) -> Unit = {},
+    onSaveApiKey: (String) -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -127,14 +133,24 @@ fun SettingsBottomSheet(
                         )
                     }
                     Text(
-                        text = if (OpenRouterClient.usesDirectKey()) {
-                            "OpenRouter (chave local) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
-                        } else {
-                            "OpenRouter via backend MangaLens"
+                        text = when {
+                            userPreferences.openRouterApiKey.isNotBlank() ->
+                                "OpenRouter (chave do app) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
+                            OpenRouterClient.usesDirectKey() ->
+                                "OpenRouter (chave do build) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
+                            else -> "OpenRouter via backend MangaLens"
                         },
                         color = Color(0xFF64748B),
                         fontSize = 11.sp,
                         modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                item {
+                    SettingsSectionTitle("Chave da OpenRouter")
+                    ApiKeyField(
+                        savedKey = userPreferences.openRouterApiKey,
+                        onSave = onSaveApiKey
                     )
                 }
 
@@ -403,6 +419,44 @@ private fun SettingsChoiceRow(
         Column {
             Text(text = title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Text(text = description, color = Color(0xFF94A3B8), fontSize = 11.sp)
+        }
+    }
+}
+
+/** Key typed once on the phone, so a CI-built APK works without embedding any secret. */
+@Composable
+private fun ApiKeyField(
+    savedKey: String,
+    onSave: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var draft by remember(savedKey) { mutableStateOf(savedKey) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it.trim() },
+            singleLine = true,
+            placeholder = { Text("sk-or-v1-…", color = Color(0xFF64748B)) },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("api_key_field")
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (savedKey.isBlank()) "Grátis em openrouter.ai/keys • fica só neste aparelho" else "Chave salva neste aparelho",
+                color = Color(0xFF64748B),
+                fontSize = 11.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (savedKey.isNotBlank()) {
+                TextButton(onClick = { onSave("") }) { Text("Remover", color = Color(0xFFF87171)) }
+            }
+            TextButton(onClick = { onSave(draft) }, enabled = draft != savedKey) {
+                Text("Salvar", color = Color(0xFF38BDF8))
+            }
         }
     }
 }
