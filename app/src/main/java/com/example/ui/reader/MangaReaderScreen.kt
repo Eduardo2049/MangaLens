@@ -627,7 +627,8 @@ fun MangaReaderScreen(
             onUpdateBubbleStyle = { viewModel.updateBubbleStyle(it) },
             onUpdateReadingMode = { },
             onUpdateTranslationMode = { viewModel.setTranslationMode(it) },
-            onUpdateTranslationEngine = { viewModel.setTranslationEngine(it) }
+            onUpdateTranslationEngine = { viewModel.setTranslationEngine(it) },
+            onSaveApiKey = { viewModel.updateOpenRouterApiKey(it) }
         )
     }
 

@@ -231,6 +231,10 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         prefsRepo.updateBubbleStyle(style)
     }
 
+    fun updateOpenRouterApiKey(key: String) {
+        prefsRepo.updateOpenRouterApiKey(key)
+    }
+
     fun openSettings() {
         _uiState.value = _uiState.value.copy(isSettingsOpen = true)
     }

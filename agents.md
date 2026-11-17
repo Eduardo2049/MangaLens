@@ -99,10 +99,24 @@ $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 
 ---
 
+## 🔤 Tradução e Ajuste nos Balões
+
+- `BlockTranslator` valida a resposta **por id**: ids desconhecidos/0-based, eco do original (CJK num alvo latino) e textos gigantes são rejeitados. Sem traduções válidas → 1 nova tentativa só com os faltantes e modelos rotacionados (`MAX_ATTEMPTS = 2`). Nunca trate "HTTP 200" como sucesso.
+- O log `Página: ocr= cacheHits= solicitados= recebidos= válidos= exibidos=` é o diagnóstico oficial; não registre o texto dos balões.
+- `BubbleTextFitter` (Kotlin puro) escolhe card + fonte: busca binária do maior tamanho que cabe (altura, largura e sem partir palavras), crescendo o card em passos sem cobrir outros balões; overflow é explícito (card mais alto), nunca truncamento.
+- `TranslationOverlayLayer` desenha exatamente o `StaticLayout` medido (`StaticLayoutMeasurer`), nunca um `TextView` que re-quebre o texto.
+
+## 🚢 CI / Release
+
+- `.github/workflows/build.yml`: testes + APK em push/PR; tag `v*` gera GitHub Release (`versionName` = tag via `-PVERSION_NAME`).
+- Nenhuma chave em builds de CI: o usuário cola a chave da OpenRouter em Configurações (`manga_lens_secrets`, excluído do backup).
+- Firebase/Google Services foram removidos (não eram usados); não reintroduza sem `google-services.json` válido.
+
 ## 🧪 Diretrizes de Teste
 
 - Sempre que criar uma nova funcionalidade de UI, considere adicionar um teste de screenshot com **Roborazzi**.
 - Testes de lógica de negócio devem ser feitos com JUnit 4 e Robolectric.
+- Respostas de modelo são simuladas (`ChatBackend` fake / interceptor OkHttp). `LiveTranslationTest` só roda com `MANGALENS_LIVE_TEST=1` e chave local; nunca no CI.
 
 ---
 *Este arquivo deve ser atualizado sempre que houver mudanças nos requisitos de ambiente ou pipeline de build.*

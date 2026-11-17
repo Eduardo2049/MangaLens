@@ -489,7 +489,6 @@ class MangaOverlayService : Service() {
 
             // If the user scrolled meanwhile, the results are cached but no longer belong on screen.
             if (!showIfSamePage(thumb, result.translations, prefs)) processedThumb = null
-            Log.d(TAG, "Página: ${result.translations.size} traduções, requests=${result.requestsSent}, cache=${result.usedCacheOnly}")
 
             when (val error = result.error) {
                 null -> setStatus(idleStatus())

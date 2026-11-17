@@ -77,7 +77,11 @@ Estados: `AUTO ●` (ativo), `AGUARDANDO...` (tela em movimento), `LENDO...` (OC
 
 Em **Configurações** escolha o modo (Automático/Manual) e o motor (OCR + texto, ou IA lê a imagem).
 
-## Configurar a OpenRouter (teste pessoal)
+## Configurar a OpenRouter
+
+**APK baixado de uma Release:** abra **Configurações → Chave da OpenRouter**, cole a chave criada em [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) e toque em **Salvar**. A chave fica só no aparelho (excluída do backup) e tem prioridade sobre qualquer outra configuração.
+
+**Build local (teste pessoal):**
 
 1. Crie uma conta e uma chave em [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
 2. Adicione ao `local.properties` (já ignorado pelo Git — a chave **nunca** vai para o repositório):
@@ -158,7 +162,44 @@ adb logcat -c
 adb logcat | Select-String "MangaLens|AndroidRuntime"
 ```
 
-Cada tradução registra o tempo do OCR e da API, e cada requisição `model=... tokens=...`, e cada página `Página: N traduções, requests=0|1, cache=true|false`.
+Cada tradução registra o tempo do OCR e da API, cada requisição `model=... tokens=...` e um resumo por página:
+
+```text
+Página: ocr=10 cacheHits=0 solicitados=10 recebidos=0 válidos=0 exibidos=0 tentativas=2 modelos=nvidia/...-content-safety,dots-... motivo=estrutura_inválida
+```
+
+`recebidos` são ids devolvidos pelo modelo, `válidos` os aceitos (id pedido, sem eco do texto original, tamanho razoável) e `exibidos` o que foi desenhado. Quando um modelo responde "ok" sem traduções úteis (ex.: um modelo de *content safety* escolhido pelo fallback), o app repete **uma vez** só com os balões faltantes, começando por outro modelo.
+
+## Testes
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+```
+
+Cobrem o pipeline de tradução com respostas simuladas (cache, ids fora do padrão, resposta vazia, streaming, limites), o cliente HTTP e o ajuste do texto aos balões (inclusive com o `StaticLayout` real via Robolectric).
+
+Teste de qualidade com um modelo real (opcional, gasta cota — nunca roda no CI):
+
+```powershell
+$env:MANGALENS_LIVE_TEST="1"
+# usa OPENROUTER_API_KEY do local.properties; para testar também na OpenAI:
+# $env:OPENAI_API_KEY="sk-..." ; $env:OPENAI_MODEL="gpt-4.1-mini"
+.\gradlew.bat :app:testDebugUnitTest --tests "*LiveTranslationTest*"
+```
+
+## Release automática por tag
+
+O workflow `.github/workflows/build.yml` roda os testes do backend e do app e gera o APK em todo push na `main`, PR e execução manual. Ao subir uma tag `v*`, cria uma **GitHub Release** com os APKs:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+- `versionName` vem da tag (`v1.0.0` → `1.0.0`) e `versionCode` do número da execução.
+- Tags com hífen (`v1.1.0-beta`) viram *pre-release*.
+- Nenhuma chave de API é embutida: o usuário cola a dele nas Configurações. Opcionalmente defina o secret `TRANSLATION_API_BASE_URL` apontando para um backend público.
+- Assinatura (opcional, recomendada para atualizar sem desinstalar): secrets `KEYSTORE_BASE64` (`base64 -w0 release.jks`), `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Sem eles o APK de release é assinado com a chave debug do runner.
 
 ## Backend (opcional)
 
@@ -191,7 +232,10 @@ Endpoints:
 app/src/main/java/com/example/
   service/MangaOverlayService.kt      Bolha flutuante + loop de detecção de mudança
   service/ScreenCaptureManager.kt     MediaProjection; frames convertidos só sob demanda
-  service/TranslationOverlayLayer.kt  Camada única de traduções (não intercepta toques)
+  service/TranslationOverlayLayer.kt  Cards de tradução (não interceptam toques), desenha o layout medido
+  service/StaticLayoutMeasurer.kt     Mede o texto com o mesmo StaticLayout usado para desenhar
+  translation/BubbleTextFitter.kt     Escolhe tamanho da fonte e do card para cada balão
+  translation/BlockTranslator.kt      Cache, validação por id, nova tentativa, estatísticas da página
   translation/                        OCR, cache, prompts, orçamento de requisições, pipeline
   data/remote/OpenRouterClient.kt     Cliente OpenRouter (fallback de modelos, 429)
 backend/src/server.js                 Proxy OpenRouter (opcional)
@@ -201,7 +245,8 @@ backend/src/server.js                 Proxy OpenRouter (opcional)
 
 | Problema | Solução |
 |---|---|
-| `Configure OPENROUTER_API_KEY` | Adicione a chave ao `local.properties` e gere o APK de novo. |
+| `Configure a chave da OpenRouter` | Cole a chave em Configurações → Chave da OpenRouter (ou no `local.properties` e gere o APK de novo). |
+| `Resposta da IA sem traduções válidas` | Os modelos da lista responderam sem o JSON esperado; veja `modelos=` no log e troque `OPENROUTER_TEXT_MODELS`. |
 | `LIMITE ⏳` | Limite por minuto/dia da OpenRouter. Aguarde; o app tenta sozinho. |
 | `ERRO ●` com "OpenRouter: ..." | Modelo indisponível: troque `OPENROUTER_TEXT_MODELS` por modelos free atuais. |
 | Nada é traduzido | Confira se a captura é "Tela inteira" e se o idioma de origem está certo (ou "Detectar"). |

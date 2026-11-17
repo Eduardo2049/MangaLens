@@ -2,39 +2,69 @@ name: Build & Release APK
 
 on:
   push:
+    branches: [ main ]
     tags:
-      - 'v*'          # triggers on v1.0, v1.2.3, etc.
+      - 'v*'          # git tag v1.2.3 && git push origin v1.2.3  ->  GitHub Release with the APK
   pull_request:
     branches: [ main ]
-  workflow_dispatch:   # allows manual trigger from the GitHub UI
+  workflow_dispatch:   # manual run from the Actions tab
+
+# Creating a release needs write access to the repository contents.
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build APK
+    name: Test & build APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # Optional: public backend that holds the OpenRouter key. Without it the user types their own
+      # free OpenRouter key in the app settings. The key itself is NEVER embedded in a CI build.
+      TRANSLATION_API_BASE_URL: ${{ secrets.TRANSLATION_API_BASE_URL }}
 
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Java ─────────────────────────────────────────────────────────────────
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
-      # ── Android SDK ──────────────────────────────────────────────────────────
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── Gradle wrapper permissions ───────────────────────────────────────────
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Grant execute permission to gradlew
         run: chmod +x gradlew
 
-      # ── Backend tests ───────────────────────────────────────────────────────
+      # ── Version: tag v1.2.3 -> versionName 1.2.3; versionCode always grows with the run number ──
+      - name: Compute version
+        id: version
+        run: |
+          if [ "$IS_TAG" = "true" ]; then
+            NAME="${GITHUB_REF_NAME#v}"
+          else
+            NAME="0.0.${GITHUB_RUN_NUMBER}-dev"
+          fi
+          CODE=$((GITHUB_RUN_NUMBER + 100))
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "ORG_GRADLE_PROJECT_VERSION_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "ORG_GRADLE_PROJECT_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "Version $NAME ($CODE)"
+
+      # ── Backend proxy tests ──────────────────────────────────────────────────
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -44,54 +74,83 @@ jobs:
         working-directory: backend
         run: npm test
 
-      # ── Build Debug APK ──────────────────────────────────────────────────────
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      # ── App: unit tests (translation pipeline, bubble fitting, client) + debug APK ──
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
-      # ── Upload debug APK as workflow artifact ────────────────────────────────
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          retention-days: 7
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: MangaLens-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MangaLens-${{ steps.version.outputs.name }}-debug
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
 
-      # ── Build Release APK (only on version tags) ─────────────────────────────
-      - name: Build release APK
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: ./gradlew assembleRelease --stacktrace
+      # ── Release (tags only) ──────────────────────────────────────────────────
+      # Optional signing secrets: KEYSTORE_BASE64 (base64 of the .jks), STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD.
+      # Without them the release APK is signed with the CI debug key (installable, but updates between
+      # releases may require uninstalling first because each runner has a different debug key).
+      - name: Decode release keystore
+        if: env.IS_TAG == 'true'
         env:
-          # Set these secrets if you have a signing keystore:
-          # KEYSTORE_PATH, STORE_PASSWORD, KEY_PASSWORD
-          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGNED_WITH=release key" >> "$GITHUB_ENV"
+          else
+            echo "::warning::KEYSTORE_BASE64 not set: release APK will be signed with the debug key"
+            echo "SIGNED_WITH=debug key" >> "$GITHUB_ENV"
+          fi
 
-      # ── Create GitHub Release with both APKs ─────────────────────────────────
+      - name: Build release APK
+        if: env.IS_TAG == 'true'
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Collect release files
+        if: env.IS_TAG == 'true'
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk "dist/MangaLens-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/debug/*.apk "dist/MangaLens-${GITHUB_REF_NAME}-debug.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          ls -la dist
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.IS_TAG == 'true'
         uses: softprops/action-gh-release@v2
         with:
           name: "MangaLens ${{ github.ref_name }}"
+          generate_release_notes: true
           body: |
             ## MangaLens ${{ github.ref_name }}
 
-            ### Download
-            | Variante | Quando usar |
+            | Arquivo | Quando usar |
             |---|---|
-            | `MangaLens-debug.apk` | Testes — logs habilitados |
-            | `MangaLens-release.apk` | Uso diário — otimizado |
+            | `MangaLens-${{ github.ref_name }}.apk` | Uso diário (assinado com ${{ env.SIGNED_WITH }}) |
+            | `MangaLens-${{ github.ref_name }}-debug.apk` | Testes — logs detalhados (`adb logcat -s MangaLens`) |
 
-            ### Instalar
-            ```bash
-            adb install MangaLens-debug.apk
-            ```
-
-            ### Configuração obrigatória
-            O APK chama o backend MangaLens. Configure `OPENROUTER_API_KEY` apenas no ambiente do backend.
-            Veja o README para instruções completas.
+            ### Primeiro uso
+            1. Instale o APK (permita "fontes desconhecidas").
+            2. Crie uma chave grátis em https://openrouter.ai/keys e cole em **Configurações → Chave da OpenRouter**.
+               A chave fica só no aparelho; nenhuma chave vai embutida no APK.
           files: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
+            dist/*.apk
+            dist/SHA256SUMS.txt
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -4,6 +4,9 @@ import com.example.data.model.SupportedLanguage
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** One text sent to the model. [maxChars] is a soft length budget derived from the bubble size. */
+data class TranslationItem(val id: Int, val text: String, val maxChars: Int? = null)
+
 /** Prompts and tolerant response parsing for the LLM calls. */
 object TranslationPrompts {
 
@@ -27,17 +30,26 @@ object TranslationPrompts {
         - The items are the speech bubbles of ONE page in reading order; read all of them before translating so the dialogue flows.
         - "context" holds earlier lines already translated; use it for names, gender and terminology, but do not translate it again.
         - If an item is not readable story text (watermark, website, credits, random OCR noise), return "" for it.
+        - "max" is roughly how many characters fit in that bubble: when the natural translation is longer, prefer a shorter equivalent phrasing, but never drop meaning.
         ${if (withImage) "- The page image is attached: use it to correct OCR mistakes, to read vertical text and to understand who is speaking." else ""}
-        Answer ONLY with compact JSON, one entry per item in the same order: {"t":[[<id>,"<translation>"],...]}
+        Answer ONLY with compact JSON, one entry per item in the same order, using the exact ids received: {"t":[[<id>,"<translation>"],...]}
     """.trimIndent()
 
-    fun textUserPrompt(items: List<Pair<Int, String>>, context: List<Pair<String, String>>): String {
+    @JvmName("textUserPromptPairs")
+    fun textUserPrompt(items: List<Pair<Int, String>>, context: List<Pair<String, String>>): String =
+        textUserPrompt(items.map { (id, text) -> TranslationItem(id, text) }, context)
+
+    fun textUserPrompt(items: List<TranslationItem>, context: List<Pair<String, String>>): String {
         val json = JSONObject()
         json.put("context", JSONArray().apply {
             context.forEach { (src, tr) -> put(JSONObject().put("src", src).put("tr", tr)) }
         })
         json.put("items", JSONArray().apply {
-            items.forEach { (id, text) -> put(JSONObject().put("id", id).put("text", text)) }
+            items.forEach { item ->
+                put(JSONObject().put("id", item.id).put("text", item.text).apply {
+                    item.maxChars?.let { put("max", it) }
+                })
+            }
         })
         return json.toString()
     }
@@ -55,6 +67,8 @@ object TranslationPrompts {
         }
         val result = mutableMapOf<Int, String>()
         for (i in 0 until array.length()) {
+            // Bare list of strings: ids are the 1-based positions.
+            (array.opt(i) as? String)?.let { result[i + 1] = it.trim() }
             // Compact form: [id, "translation"].
             array.optJSONArray(i)?.let { pair ->
                 val id = pair.optInt(0, -1)

@@ -1,15 +1,30 @@
 import java.util.Properties
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
-  alias(libs.plugins.google.services)
 }
 
 // kotlin { jvmToolchain(17) }
+
+// Local-only settings: local.properties (git-ignored) > -P gradle property > environment variable.
+val localProps = Properties().apply {
+  val content = providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+    .asText.orNull
+  if (content != null) load(content.reader())
+}
+fun localSetting(name: String, default: String): String =
+  localProps.getProperty(name)?.takeIf { it.isNotBlank() }
+    ?: providers.gradleProperty(name).orNull?.takeIf { it.isNotBlank() }
+    ?: providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
+    ?: default
+fun buildString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+// Release signing is optional: CI decodes the keystore from secrets; without it the release APK is
+// signed with the debug key so a tag still produces an installable APK.
+val releaseKeystore = localSetting("KEYSTORE_PATH", "").takeIf { it.isNotBlank() }?.let { file(it) }?.takeIf { it.exists() }
 
 android {
   namespace = "com.example"
@@ -19,20 +34,9 @@ android {
     applicationId = "com.aistudio.mangalens.trvis"
     minSdk = 24
     targetSdk = 35
-    versionCode = 8
-    versionName = "0.8"
-    // Local-only settings: local.properties (git-ignored) > -P gradle property > environment variable.
-    val localProps = Properties().apply {
-      val content = providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
-        .asText.orNull
-      if (content != null) load(content.reader())
-    }
-    fun localSetting(name: String, default: String): String =
-      localProps.getProperty(name)?.takeIf { it.isNotBlank() }
-        ?: providers.gradleProperty(name).orNull?.takeIf { it.isNotBlank() }
-        ?: providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
-        ?: default
-    fun buildString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    // CI passes -PVERSION_NAME=<tag without "v"> and -PVERSION_CODE=<run number>.
+    versionCode = localSetting("VERSION_CODE", "8").toIntOrNull() ?: 8
+    versionName = localSetting("VERSION_NAME", "0.8")
 
     // When OPENROUTER_API_KEY is set the app calls OpenRouter directly (personal testing).
     // Otherwise it uses the backend proxy at TRANSLATION_API_BASE_URL, which holds the key.
@@ -53,12 +57,13 @@ android {
   }
 
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "$rootDir/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    if (releaseKeystore != null) {
+      create("release") {
+        storeFile = releaseKeystore
+        storePassword = localSetting("STORE_PASSWORD", "")
+        keyAlias = localSetting("KEY_ALIAS", "upload")
+        keyPassword = localSetting("KEY_PASSWORD", "")
+      }
     }
   }
 
@@ -67,7 +72,7 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
     }
     debug { }
   }
@@ -85,13 +90,20 @@ android {
   // Use the default app-debug.apk location
 }
 
-googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
+tasks.withType<Test>().configureEach {
+  // Live API tests (LiveTranslationTest) only run with MANGALENS_LIVE_TEST=1; changing it must re-run tests.
+  inputs.property("liveTest", providers.environmentVariable("MANGALENS_LIVE_TEST").orElse("0"))
+  testLogging {
+    events("failed", "skipped")
+    exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    showStandardStreams = providers.environmentVariable("MANGALENS_LIVE_TEST").orNull == "1"
+  }
+}
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -114,18 +126,6 @@ dependencies {
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
-  // Uncomment to use Firestore:
-  // implementation(libs.firebase.firestore)
-
-  // Firebase Auth with Google Sign-In requires all of the following to be uncommented together.
-  // If you are using Firebase Auth with other providers (e.g. Email/Password), you may only need
-  // firebase-auth.
-  // implementation(libs.firebase.auth)
-  // implementation(libs.androidx.credentials)
-  // implementation(libs.androidx.credentials.play.services)
-  // implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)

@@ -12,7 +12,9 @@ data class ScreenTranslation(
     val translatedText: String,
     val box: Box,
     val isVertical: Boolean = false,
-    val bubbleType: String = "SPEECH"
+    val bubbleType: String = "SPEECH",
+    /** Height of the original glyphs in capture pixels (0 = unknown); used to match the lettering size. */
+    val lineHeight: Int = 0
 )
 
 /**

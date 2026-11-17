@@ -18,11 +18,15 @@ data class UserPreferences(
     val overlayOpacity: Float = 0.92f,
     val overlayFontSizeSp: Int = 13,
     val bubbleStyle: String = "SPEECH_BUBBLE", // SPEECH_BUBBLE, SOLID_HIGHLIGHT, SEMI_TRANSPARENT
-    val readingMode: String = "WEBTOON" // WEBTOON (vertical scroll) vs MANGA_PAGES (page by page)
+    val readingMode: String = "WEBTOON", // WEBTOON (vertical scroll) vs MANGA_PAGES (page by page)
+    /** OpenRouter key typed in the app (empty = build-time key or backend proxy). */
+    val openRouterApiKey: String = ""
 )
 
 class UserPreferencesRepository(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("manga_lens_prefs", Context.MODE_PRIVATE)
+    // Separate file so it can be excluded from cloud backup / device transfer (see res/xml backup rules).
+    private val secrets: SharedPreferences = context.getSharedPreferences(SECRETS_FILE, Context.MODE_PRIVATE)
 
     private val _preferences = MutableStateFlow(loadPreferences())
     val preferences: StateFlow<UserPreferences> = _preferences.asStateFlow()
@@ -35,6 +39,7 @@ class UserPreferencesRepository(context: Context) {
 
     init {
         prefs.registerOnSharedPreferenceChangeListener(changeListener)
+        secrets.registerOnSharedPreferenceChangeListener(changeListener)
     }
 
     private fun loadPreferences(): UserPreferences {
@@ -57,8 +62,20 @@ class UserPreferencesRepository(context: Context) {
             overlayOpacity = opacity,
             overlayFontSizeSp = fontSize,
             bubbleStyle = bubbleStyle,
-            readingMode = readingMode
+            readingMode = readingMode,
+            openRouterApiKey = secrets.getString(KEY_OPENROUTER, "").orEmpty()
         )
+    }
+
+    fun updateOpenRouterApiKey(key: String) {
+        val clean = key.trim()
+        secrets.edit().putString(KEY_OPENROUTER, clean).apply()
+        _preferences.value = _preferences.value.copy(openRouterApiKey = clean)
+    }
+
+    private companion object {
+        const val SECRETS_FILE = "manga_lens_secrets"
+        const val KEY_OPENROUTER = "openrouter_api_key"
     }
 
     fun updateSourceLanguage(language: SupportedLanguage) {

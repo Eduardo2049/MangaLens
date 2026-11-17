@@ -15,7 +15,7 @@ class RequestBudget(
     private val dailyLimit: Int,
     private val minIntervalMillis: Long = 3_500L,
     private val clock: () -> Long = System::currentTimeMillis
-) {
+) : RequestGate {
     private val prefs: SharedPreferences = context.getSharedPreferences("manga_lens_budget", Context.MODE_PRIVATE)
     private var lastRequestAt = 0L
 
@@ -26,18 +26,18 @@ class RequestBudget(
     val usedToday: Int
         @Synchronized get() = if (prefs.getString(KEY_DAY, null) == today()) prefs.getInt(KEY_COUNT, 0) else 0
 
-    val limit: Int get() = dailyLimit
+    override val limit: Int get() = dailyLimit
 
     /** Milliseconds to wait before the next request may be sent, or null when the daily limit is spent. */
     @Synchronized
-    fun waitTimeMillis(): Long? {
+    override fun waitTimeMillis(): Long? {
         if (dailyLimit in 1..usedToday) return null
         val now = clock()
         return maxOf(0L, blockedUntil - now, lastRequestAt + minIntervalMillis - now)
     }
 
     @Synchronized
-    fun recordRequest() {
+    override fun recordRequest() {
         lastRequestAt = clock()
         val day = today()
         val count = if (prefs.getString(KEY_DAY, null) == day) prefs.getInt(KEY_COUNT, 0) else 0
@@ -45,7 +45,7 @@ class RequestBudget(
     }
 
     @Synchronized
-    fun blockUntil(timestampMillis: Long) {
+    override fun blockUntil(timestampMillis: Long) {
         blockedUntil = maxOf(blockedUntil, timestampMillis)
     }
 
