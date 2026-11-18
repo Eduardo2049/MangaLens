@@ -119,7 +119,7 @@ OPENROUTER_DAILY_LIMIT=50
 O Gradle 9.3.1 e o Android Gradle Plugin deste projeto exigem Java 17 ou superior. Se o console informar que está usando JVM 8, feche todas as janelas do VS Code e abra uma nova a partir do PowerShell com o JDK correto:
 
 ```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+$env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 $env:Path="$env:JAVA_HOME\bin;$env:Path"
 code .
 ```
@@ -138,7 +138,7 @@ O arquivo `.vscode/settings.json` usa `${env:JAVA_HOME}` para que o projeto não
 ## Gerar e instalar o APK
 
 ```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+$env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 .\gradlew.bat :app:testDebugUnitTest
 .\gradlew.bat :app:assembleDebug
 adb install -r app\build\outputs\apk\debug\app-debug.apk

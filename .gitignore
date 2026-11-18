@@ -19,3 +19,4 @@ local.properties
 back/node_modules/
 debug.keystore
 build_output.txt
+.artifacts/

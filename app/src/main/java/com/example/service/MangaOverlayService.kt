@@ -39,6 +39,7 @@ import com.example.data.remote.RateLimitedException
 import com.example.translation.Box
 import com.example.translation.DailyLimitReachedException
 import com.example.translation.FrameThumbnail
+import com.example.translation.ScreenMath
 import com.example.translation.TranslationPipeline
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -297,6 +298,7 @@ class MangaOverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     val moved = abs(event.rawX - touchX) > slop || abs(event.rawY - touchY) > slop
+                    if (moved) keepBubbleOnScreen()
                     if (!moved) {
                         v.performClick()
                         if (System.currentTimeMillis() - downAt >= LONG_PRESS_MS) onLongPress() else onTap()
@@ -306,6 +308,19 @@ class MangaOverlayService : Service() {
                 else -> false
             }
         }
+    }
+
+    /** A bubble dropped past an edge (or pushed off by a rotation) is moved back where it can be touched. */
+    private fun keepBubbleOnScreen() {
+        val view = bubbleRoot ?: return
+        val params = bubbleParams ?: return
+        val width = captureManager.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val height = captureManager.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val (x, y) = ScreenMath.clampToScreen(params.x, params.y, view.width, view.height, width, height)
+        if (x == params.x && y == params.y) return
+        params.x = x
+        params.y = y
+        try { windowManager?.updateViewLayout(view, params) } catch (_: Exception) {}
     }
 
     private fun onTap() {
@@ -551,9 +566,12 @@ class MangaOverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        captureManager.onDisplayChanged()
-        clearTranslations()
-        resetPageState()
+        // Dark mode, font scale or locale changes also land here; only a new screen size invalidates the page.
+        if (captureManager.onDisplayChanged()) {
+            clearTranslations()
+            resetPageState()
+            keepBubbleOnScreen()
+        }
     }
 
     override fun onDestroy() {

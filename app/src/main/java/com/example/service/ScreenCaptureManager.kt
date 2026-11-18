@@ -97,11 +97,14 @@ class ScreenCaptureManager(private val context: Context) {
         }
     }
 
-    /** Call after rotation / display changes so the mirror keeps the real screen size. */
-    fun onDisplayChanged() {
-        val display = virtualDisplay ?: return
+    /**
+     * Call after rotation / display changes so the mirror keeps the real screen size.
+     * @return true when the screen size really changed (the current page and its cards are no longer valid).
+     */
+    fun onDisplayChanged(): Boolean {
+        val display = virtualDisplay ?: return false
         val (w, h, dpi) = readDisplayMetrics()
-        if (w == width && h == height) return
+        if (w == width && h == height) return false
         val newReader = newImageReader(w, h)
         synchronized(lock) {
             latestImage?.close()
@@ -114,6 +117,7 @@ class ScreenCaptureManager(private val context: Context) {
         imageReader?.close()
         imageReader = newReader
         Log.d(TAG, "Capture: redimensionado para ${w}x$h")
+        return true
     }
 
     private fun newImageReader(w: Int, h: Int): ImageReader =
