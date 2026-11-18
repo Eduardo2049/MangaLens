@@ -112,6 +112,7 @@ $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 
 - `.github/workflows/build.yml`: testes + APK em push/PR; tag `v*` gera GitHub Release (`versionName` = tag via `-PVERSION_NAME`).
 - Nenhuma chave em builds de CI: o usuário cola a chave da OpenRouter em Configurações (`manga_lens_secrets`, excluído do backup).
+- O projeto não tem backend em produção: o padrão é cada usuário colar a própria chave. Tudo que for de backend fica na pasta `back/` (proxy Node.js opcional).
 - `TRANSLATION_API_BASE_URL` não tem valor padrão: nunca volte a usar `10.0.2.2` como padrão (só existe no emulador). Backend público deve exigir `MANGALENS_APP_TOKEN` (app envia `X-MangaLens-Token` = `TRANSLATION_API_TOKEN`).
 - O histórico (Room, `AppDatabase.get`) recebe só traduções novas (`PageResult.fresh`) da bolha e da imagem de teste; fica limitado a `HISTORY_LIMIT` linhas.
 - Firebase/Google Services foram removidos (não eram usados); não reintroduza sem `google-services.json` válido.

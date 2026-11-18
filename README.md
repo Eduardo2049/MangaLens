@@ -201,7 +201,10 @@ git push origin v1.0.0
 - Nenhuma chave de API é embutida: o usuário cola a dele nas Configurações. Opcionalmente defina os secrets `TRANSLATION_API_BASE_URL` (backend público, **https**) e `TRANSLATION_API_TOKEN` (o mesmo valor de `MANGALENS_APP_TOKEN` no backend). Sem `TRANSLATION_API_BASE_URL` o APK não tenta nenhum backend e pede a chave nas Configurações.
 - Assinatura (opcional, recomendada para atualizar sem desinstalar): secrets `KEYSTORE_BASE64` (`base64 -w0 release.jks`), `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Sem eles o APK de release é assinado com a chave debug do runner.
 
-## Backend (opcional)
+## Backend (opcional, pasta `back/`)
+
+O projeto **não depende de backend**: sem nenhum configurado (o padrão), cada usuário cola a própria chave grátis da OpenRouter em Configurações. A pasta `back/` só é necessária se um dia você quiser hospedar um proxy que guarde a chave fora do APK.
+
 
 Sem chave (nas Configurações ou `OPENROUTER_API_KEY` no `local.properties`), o app usa o backend em `TRANSLATION_API_BASE_URL`. **Não há valor padrão**: sem backend configurado, o app pede a chave. Para o backend local no emulador, adicione ao `local.properties`:
 
@@ -212,9 +215,9 @@ TRANSLATION_API_BASE_URL=http://10.0.2.2:8080
 O backend é um proxy fino para a OpenRouter: injeta a chave, **recusa modelos pagos** e repassa as respostas em streaming (os balões aparecem um a um também via backend).
 
 ```powershell
-cd backend
+cd back
 Copy-Item .env.example .env
-# Edite backend/.env e informe OPENROUTER_API_KEY (e MANGALENS_APP_TOKEN se o backend for público)
+# Edite back/.env e informe OPENROUTER_API_KEY (e MANGALENS_APP_TOKEN se o backend for público)
 npm test
 npm start
 ```
@@ -227,7 +230,7 @@ Verifique em `http://localhost:8080/health`. Para celular físico, use o IPv4 do
 
 O build debug permite HTTP sem TLS para esse backend local; o release não.
 
-Variáveis do backend (`backend/.env`):
+Variáveis do backend (`back/.env`):
 
 | Variável | Para quê |
 |---|---|
@@ -253,7 +256,7 @@ app/src/main/java/com/example/
   translation/BlockTranslator.kt      Cache, validação por id, nova tentativa, estatísticas da página
   translation/                        OCR, cache, prompts, orçamento de requisições, pipeline
   data/remote/OpenRouterClient.kt     Cliente OpenRouter (fallback de modelos, 429)
-backend/src/server.js                 Proxy OpenRouter (opcional)
+back/src/server.js                    Proxy OpenRouter (opcional)
 ```
 
 ## Troubleshooting
@@ -267,7 +270,7 @@ backend/src/server.js                 Proxy OpenRouter (opcional)
 | Nada é traduzido | Confira se a captura é "Tela inteira" e se o idioma de origem está certo (ou "Detectar"). |
 | Texto lido errado (OCR) ou mangá vertical | Use o motor "OCR + IA vendo a imagem" nas Configurações. |
 | Tradução lenta | Veja no logcat `OCR: ... ms` e `API: ... ms` para saber qual etapa demora; modelos free variam de velocidade, ajuste `OPENROUTER_TEXT_MODELS`. |
-| Backend não conecta | `npm start` em `backend/`, `/health`, IPv4 correto e firewall. |
+| Backend não conecta | `npm start` em `back/`, `/health`, IPv4 correto e firewall. |
 | Backend responde `401` | `TRANSLATION_API_TOKEN` do APK diferente de `MANGALENS_APP_TOKEN` do backend. |
 | Captura só mostra o MangaLens / tela preta | No Android 14+ o app já pede "Tela inteira"; se o sistema ainda oferecer, não escolha "Um único app". |
 | Limite diário errado | Configurações → Limite diário: 50 (grátis) ou 1000 (com créditos). O dia é contado em UTC, como na OpenRouter (vira às 21h de Brasília). |
