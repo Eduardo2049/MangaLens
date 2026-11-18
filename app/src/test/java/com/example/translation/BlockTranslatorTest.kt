@@ -258,6 +258,33 @@ class BlockTranslatorTest {
     }
 
     @Test
+    fun `zero based streamed answer never shows a bubble with its neighbour's text`() = runTest {
+        val zeroBased = { items: List<Pair<Int, String>> -> json(items.map { (id, text) -> id - 1 to "PT:$text" }) }
+        val chat = ScriptedChat({ items -> Result.success(ChatReply(zeroBased(items), "m")) })
+        chat.streamChunks = { items ->
+            val full = zeroBased(items)
+            (1..4).asSequence().map { k -> now += 400; full.substring(0, full.length * k / 4) }
+        }
+        val partials = mutableListOf<List<ScreenTranslation>>()
+        val result = translator().translate(blocks(4), en, pt, chat) { partials += it }
+        assertTrue("nenhum balão parcial", partials.isNotEmpty())
+        (partials.flatten() + result.translations).forEach {
+            assertEquals("PT:${it.originalText}", it.translatedText)
+        }
+        assertEquals(4, result.translations.size)
+    }
+
+    @Test
+    fun `fresh lists only bubbles that came from the api`() = runTest {
+        val cache = TextTranslationCache()
+        val page = blocks(3)
+        cache.put("en>pt", page[0].text, "já traduzido")
+        val result = translator(cache = cache).translate(page, en, pt, ScriptedChat(translated()))
+        assertEquals(3, result.translations.size)
+        assertEquals(page.drop(1).map { it.text }, result.fresh.map { it.originalText })
+    }
+
+    @Test
     fun `rotation moves the failing model to the end`() {
         val models = listOf("a/x:free", "b/y:free", "c/z:free")
         assertEquals(listOf("a/x:free", "c/z:free", "b/y:free"), BlockTranslator.rotate(models, "b/y"))

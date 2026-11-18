@@ -2,6 +2,7 @@ package com.example.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.BuildConfig
 import com.example.data.model.SupportedLanguage
 import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
@@ -14,14 +15,23 @@ data class UserPreferences(
     val targetLanguage: SupportedLanguage = SupportedLanguage.PORTUGUESE,
     val translationMode: TranslationMode = TranslationMode.DYNAMIC,
     val translationEngine: TranslationEngine = TranslationEngine.OCR_TEXT,
-    val isTranslationEnabled: Boolean = true,
-    val overlayOpacity: Float = 0.92f,
+    /** Card opacity. Android caps touch-through overlays at [MAX_OVERLAY_OPACITY], so that is the maximum. */
+    val overlayOpacity: Float = MAX_OVERLAY_OPACITY,
     val overlayFontSizeSp: Int = 13,
     val bubbleStyle: String = "SPEECH_BUBBLE", // SPEECH_BUBBLE, SOLID_HIGHLIGHT, SEMI_TRANSPARENT
-    val readingMode: String = "WEBTOON", // WEBTOON (vertical scroll) vs MANGA_PAGES (page by page)
     /** OpenRouter key typed in the app (empty = build-time key or backend proxy). */
-    val openRouterApiKey: String = ""
-)
+    val openRouterApiKey: String = "",
+    /** Requests per (UTC) day the app allows itself: 50 on the free tier, 1000 after buying credits once. */
+    val dailyRequestLimit: Int = BuildConfig.OPENROUTER_DAILY_LIMIT
+) {
+    companion object {
+        const val MIN_OVERLAY_OPACITY = 0.5f
+        /** System limit for untouchable overlay windows (Android 12+); anything above is ignored by Android. */
+        const val MAX_OVERLAY_OPACITY = 0.8f
+        const val FREE_DAILY_LIMIT = 50
+        const val CREDITS_DAILY_LIMIT = 1000
+    }
+}
 
 class UserPreferencesRepository(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("manga_lens_prefs", Context.MODE_PRIVATE)
@@ -47,23 +57,23 @@ class UserPreferencesRepository(context: Context) {
         val tgtCode = prefs.getString("target_lang", SupportedLanguage.PORTUGUESE.code) ?: SupportedLanguage.PORTUGUESE.code
         val modeStr = prefs.getString("translation_mode", TranslationMode.DYNAMIC.name) ?: TranslationMode.DYNAMIC.name
         val engineStr = prefs.getString("translation_engine", TranslationEngine.OCR_TEXT.name) ?: TranslationEngine.OCR_TEXT.name
-        val isEnabled = prefs.getBoolean("is_translation_enabled", true)
-        val opacity = prefs.getFloat("overlay_opacity", 0.92f)
+        // Values saved by older versions (up to 100%) are brought into the range Android really applies.
+        val opacity = prefs.getFloat("overlay_opacity", UserPreferences.MAX_OVERLAY_OPACITY)
+            .coerceIn(UserPreferences.MIN_OVERLAY_OPACITY, UserPreferences.MAX_OVERLAY_OPACITY)
         val fontSize = prefs.getInt("overlay_font_size", 13)
         val bubbleStyle = prefs.getString("bubble_style", "SPEECH_BUBBLE") ?: "SPEECH_BUBBLE"
-        val readingMode = prefs.getString("reading_mode", "WEBTOON") ?: "WEBTOON"
+        val dailyLimit = prefs.getInt("daily_request_limit", BuildConfig.OPENROUTER_DAILY_LIMIT)
 
         return UserPreferences(
             sourceLanguage = SupportedLanguage.fromCode(srcCode),
             targetLanguage = SupportedLanguage.fromCode(tgtCode),
             translationMode = try { TranslationMode.valueOf(modeStr) } catch (e: Exception) { TranslationMode.DYNAMIC },
             translationEngine = try { TranslationEngine.valueOf(engineStr) } catch (e: Exception) { TranslationEngine.OCR_TEXT },
-            isTranslationEnabled = isEnabled,
             overlayOpacity = opacity,
             overlayFontSizeSp = fontSize,
             bubbleStyle = bubbleStyle,
-            readingMode = readingMode,
-            openRouterApiKey = secrets.getString(KEY_OPENROUTER, "").orEmpty()
+            openRouterApiKey = secrets.getString(KEY_OPENROUTER, "").orEmpty(),
+            dailyRequestLimit = dailyLimit
         )
     }
 
@@ -98,14 +108,15 @@ class UserPreferencesRepository(context: Context) {
         _preferences.value = _preferences.value.copy(translationEngine = engine)
     }
 
-    fun setTranslationEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("is_translation_enabled", enabled).apply()
-        _preferences.value = _preferences.value.copy(isTranslationEnabled = enabled)
+    fun updateOverlayOpacity(opacity: Float) {
+        val clamped = opacity.coerceIn(UserPreferences.MIN_OVERLAY_OPACITY, UserPreferences.MAX_OVERLAY_OPACITY)
+        prefs.edit().putFloat("overlay_opacity", clamped).apply()
+        _preferences.value = _preferences.value.copy(overlayOpacity = clamped)
     }
 
-    fun updateOverlayOpacity(opacity: Float) {
-        prefs.edit().putFloat("overlay_opacity", opacity).apply()
-        _preferences.value = _preferences.value.copy(overlayOpacity = opacity)
+    fun updateDailyRequestLimit(limit: Int) {
+        prefs.edit().putInt("daily_request_limit", limit).apply()
+        _preferences.value = _preferences.value.copy(dailyRequestLimit = limit)
     }
 
     fun updateOverlayFontSize(fontSizeSp: Int) {
@@ -118,8 +129,4 @@ class UserPreferencesRepository(context: Context) {
         _preferences.value = _preferences.value.copy(bubbleStyle = style)
     }
 
-    fun updateReadingMode(mode: String) {
-        prefs.edit().putString("reading_mode", mode).apply()
-        _preferences.value = _preferences.value.copy(readingMode = mode)
-    }
 }

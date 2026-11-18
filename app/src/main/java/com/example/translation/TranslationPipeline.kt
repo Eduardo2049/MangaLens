@@ -35,8 +35,10 @@ class TranslationPipeline(
         onPartial: (List<ScreenTranslation>) -> Unit = {}
     ): PageResult {
         if (!client.isConfigured(prefs.openRouterApiKey)) {
-            return PageResult(emptyList(), 0, IllegalStateException("Configure a chave da OpenRouter nas configurações do app"))
+            return PageResult(emptyList(), 0, IllegalStateException(OpenRouterClient.MISSING_KEY_MESSAGE))
         }
+        // Users who bought OpenRouter credits get 1000/day instead of 50: the limit follows the settings.
+        budget.dailyLimit = prefs.dailyRequestLimit
         val ocrStart = SystemClock.elapsedRealtime()
         val blocks = TextRegions.prepare(
             ocr.recognize(bitmap, prefs.sourceLanguage), exclusions, bitmap.width, bitmap.height

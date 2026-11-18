@@ -51,7 +51,9 @@ data class PageResult(
     val requestsSent: Int,
     val error: Throwable? = null,
     val usedCacheOnly: Boolean = false,
-    val stats: PageStats = PageStats()
+    val stats: PageStats = PageStats(),
+    /** Translations obtained from the API for this page (not from the cache); what goes to the history. */
+    val fresh: List<ScreenTranslation> = emptyList()
 )
 
 class DailyLimitReachedException(limit: Int) :
@@ -117,8 +119,11 @@ class BlockTranslator(
                 image,
                 (300 + items.sumOf { it.text.length } * 5).coerceAtLeast(512)
             ) { soFar ->
-                // Show bubbles while the model is still writing the rest of the page.
-                val done = accept(items, TranslationPrompts.parsePartialTranslations(soFar), target)
+                // Show bubbles while the model is still writing the rest of the page. Ids are normalized
+                // exactly like the final answer: a 0-based answer would otherwise show (and cache) every
+                // bubble with its neighbour's text until the stream ends.
+                val partial = normalizeIds(TranslationPrompts.parsePartialTranslations(soFar), items.size)
+                val done = accept(items, partial, target)
                 val now = clock()
                 if (done.size > emitted && now - lastEmitAt >= STREAM_EMIT_INTERVAL_MS) {
                     done.forEach { (item, text) -> cache.put(pair, item.text, text) }
@@ -164,7 +169,11 @@ class BlockTranslator(
             )
         }
         val shown = toScreen(blocks, pair)
-        return PageResult(shown, requests, error, usedCacheOnly = false, stats = stats.copy(shown = shown.size))
+        val requestedTexts = uncached.map { it.text }.toSet()
+        return PageResult(
+            shown, requests, error, usedCacheOnly = false, stats = stats.copy(shown = shown.size),
+            fresh = shown.filter { it.originalText in requestedTexts }
+        )
     }
 
     private fun toScreen(blocks: List<OcrBlock>, pair: String): List<ScreenTranslation> =

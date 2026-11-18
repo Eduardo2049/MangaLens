@@ -5,8 +5,8 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.room.Room
 import com.example.data.local.AppDatabase
+import com.example.data.local.TranslationHistory
 import com.example.data.local.TranslationHistoryEntity
 import com.example.data.local.UserPreferences
 import com.example.data.local.UserPreferencesRepository
@@ -46,20 +46,15 @@ data class MangaUiState(
 
 class MangaReaderViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = Room.databaseBuilder(
-        application,
-        AppDatabase::class.java,
-        "manga_lens_db"
-    ).build()
-
-    private val historyDao = db.translationHistoryDao()
+    private val historyDao = AppDatabase.get(application).translationHistoryDao()
     private val prefsRepo = UserPreferencesRepository(application)
     private val pipeline = TranslationPipeline(application)
 
     private val _uiState = MutableStateFlow(MangaUiState())
     val uiState: StateFlow<MangaUiState> = _uiState.asStateFlow()
 
-    private var autoTranslateJob: Job? = null
+    /** The translation in progress; a new one (another image, language or engine) cancels it. */
+    private var translationJob: Job? = null
 
     init {
         // Observe preferences
@@ -118,11 +113,13 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     fun triggerTranslation() {
         val prefs = _uiState.value.userPreferences
-        if (!prefs.isTranslationEnabled) return
 
         _uiState.value = _uiState.value.copy(isProcessing = true)
 
-        viewModelScope.launch {
+        // Without this, changing the language twice fired two paid requests and whichever finished last
+        // won, possibly showing the translation for the language that is no longer selected.
+        translationJob?.cancel()
+        translationJob = viewModelScope.launch {
             delay(400.milliseconds) // Smooth visual feedback
 
             val bitmapToProcess = _uiState.value.customBitmap
@@ -159,7 +156,11 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
                         isProcessing = false,
                         statusMessage = if (overlays.isEmpty()) "Nenhum texto detectado nesta área." else null
                     )
-                    saveOverlaysToHistory(overlays)
+                    TranslationHistory.record(
+                        historyDao,
+                        result.fresh.map { it.originalText to it.translatedText },
+                        prefs.sourceLanguage, prefs.targetLanguage, CUSTOM_IMAGE_TITLE
+                    )
                 }
             } else {
                 // Built-in sample panel: simulated dynamic translation update with sample data
@@ -167,39 +168,13 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
                 val panel = chapter?.panels?.getOrNull(_uiState.value.selectedPanelIndex)
                 val sampleOverlays = panel?.sampleOverlays ?: emptyList()
 
+                // Sample data is not a real translation: it does not go to the history.
                 _uiState.value = _uiState.value.copy(
                     activeOverlays = sampleOverlays,
                     isProcessing = false,
                     statusMessage = null
                 )
-                saveOverlaysToHistory(sampleOverlays)
             }
-        }
-    }
-
-    private suspend fun saveOverlaysToHistory(overlays: List<TextOverlay>) {
-        val prefs = _uiState.value.userPreferences
-        val chapterTitle = currentChapter?.title ?: "Manga Personalizado"
-
-        overlays.take(3).forEach { overlay ->
-            historyDao.insertTranslation(
-                TranslationHistoryEntity(
-                    originalText = overlay.originalText,
-                    translatedText = overlay.translatedText,
-                    sourceLang = prefs.sourceLanguage.displayName,
-                    targetLang = prefs.targetLanguage.displayName,
-                    chapterTitle = chapterTitle
-                )
-            )
-        }
-    }
-
-    fun setTranslationEnabled(enabled: Boolean) {
-        prefsRepo.setTranslationEnabled(enabled)
-        if (enabled) {
-            triggerTranslation()
-        } else {
-            _uiState.value = _uiState.value.copy(activeOverlays = emptyList())
         }
     }
 
@@ -235,6 +210,10 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         prefsRepo.updateOpenRouterApiKey(key)
     }
 
+    fun updateDailyRequestLimit(limit: Int) {
+        prefsRepo.updateDailyRequestLimit(limit)
+    }
+
     fun openSettings() {
         _uiState.value = _uiState.value.copy(isSettingsOpen = true)
     }
@@ -261,7 +240,11 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     override fun onCleared() {
         super.onCleared()
-        autoTranslateJob?.cancel()
+        translationJob?.cancel()
         pipeline.close()
+    }
+
+    private companion object {
+        const val CUSTOM_IMAGE_TITLE = "Imagem de teste"
     }
 }

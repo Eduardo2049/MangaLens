@@ -54,7 +54,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.net.toUri
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +68,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.local.TranslationHistory
 import com.example.service.MangaOverlayService
 import com.example.ui.components.LanguagePickerDialog
 import com.example.ui.components.MangaCanvasViewer
@@ -86,8 +90,13 @@ fun MangaReaderScreen(
     val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val langSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Check overlay permission on start
-    val hasOverlayPermission = Settings.canDrawOverlays(context)
+    // Re-checked every time the screen comes back (e.g. from the system overlay settings): a value read only
+    // during composition stayed "Permissão Necessária" after the user had granted it.
+    var hasOverlayPermission by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    LifecycleResumeEffect(Unit) {
+        hasOverlayPermission = Settings.canDrawOverlays(context)
+        onPauseOrDispose { }
+    }
     LaunchedEffect(hasOverlayPermission) {
         viewModel.updateOverlayPermissionGranted(hasOverlayPermission)
     }
@@ -103,15 +112,17 @@ fun MangaReaderScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
-            try {
-                context.contentResolver.openInputStream(it)?.use { stream ->
-                    val bitmap = BitmapFactory.decodeStream(stream)
-                    if (bitmap != null) {
-                        viewModel.setCustomBitmap(bitmap)
-                    }
-                }
+            val bitmap = try {
+                context.contentResolver.openInputStream(it)?.use { stream -> BitmapFactory.decodeStream(stream) }
             } catch (e: Exception) {
-                e.printStackTrace()
+                null
+            } catch (e: OutOfMemoryError) {
+                null
+            }
+            if (bitmap != null) {
+                viewModel.setCustomBitmap(bitmap)
+            } else {
+                Toast.makeText(context, "Não foi possível abrir esta imagem", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -594,13 +605,13 @@ fun MangaReaderScreen(
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
                                     Text(
-                                        text = "JP: ${history.originalText}",
+                                        text = "${TranslationHistory.languageLabel(history.sourceLang)}: ${history.originalText}",
                                         color = Color(0xFF94A3B8),
                                         fontSize = 11.sp
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "PT: ${history.translatedText}",
+                                        text = "${TranslationHistory.languageLabel(history.targetLang)}: ${history.translatedText}",
                                         color = Color(0xFF38BDF8),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
@@ -625,7 +636,7 @@ fun MangaReaderScreen(
             onUpdateOpacity = { viewModel.updateOverlayOpacity(it) },
             onUpdateFontSize = { viewModel.updateOverlayFontSize(it) },
             onUpdateBubbleStyle = { viewModel.updateBubbleStyle(it) },
-            onUpdateReadingMode = { },
+            onUpdateDailyLimit = { viewModel.updateDailyRequestLimit(it) },
             onUpdateTranslationMode = { viewModel.setTranslationMode(it) },
             onUpdateTranslationEngine = { viewModel.setTranslationEngine(it) },
             onSaveApiKey = { viewModel.updateOpenRouterApiKey(it) }

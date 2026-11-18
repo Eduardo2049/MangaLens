@@ -16,5 +16,6 @@
 .cxx
 local.properties
 .env
-backend/node_modules/
+back/node_modules/
 debug.keystore
+build_output.txt

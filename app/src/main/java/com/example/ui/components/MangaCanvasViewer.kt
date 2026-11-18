@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -104,6 +105,11 @@ fun MangaCanvasViewer(
     ) {
         val containerWidthPx = constraints.maxWidth.toFloat()
         val containerHeightPx = constraints.maxHeight.toFloat()
+        // The picture is drawn with ContentScale.Fit (letterboxed), so overlay percentages must be applied to
+        // the rectangle the image really occupies, not to the whole container.
+        val imageRect = fittedImageRect(
+            customBitmap?.width ?: 0, customBitmap?.height ?: 0, containerWidthPx, containerHeightPx
+        )
 
         // Background Manga Illustration Canvas
         if (customBitmap != null) {
@@ -122,22 +128,23 @@ fun MangaCanvasViewer(
         }
 
         // Overlay Text Layer
-        if (userPreferences.isTranslationEnabled && overlays.isNotEmpty()) {
+        if (overlays.isNotEmpty()) {
             Box(modifier = Modifier.fillMaxSize()) {
                 overlays.forEach { overlay ->
                     val isSelected = overlay.id == selectedOverlayId
 
-                    val leftDp = (overlay.box.xMin / 100f * containerWidthPx) / LocalDensityWidth()
-                    val topDp = (overlay.box.yMin / 100f * containerHeightPx) / LocalDensityHeight()
-                    val widthDp = (overlay.box.widthPercent / 100f * containerWidthPx) / LocalDensityWidth()
-                    val heightDp = (overlay.box.heightPercent / 100f * containerHeightPx) / LocalDensityHeight()
+                    val density = LocalDensity.current.density
+                    val leftDp = (imageRect.left + overlay.box.xMin / 100f * imageRect.width) / density
+                    val topDp = (imageRect.top + overlay.box.yMin / 100f * imageRect.height) / density
+                    val widthDp = (overlay.box.widthPercent / 100f * imageRect.width) / density
+                    val heightDp = (overlay.box.heightPercent / 100f * imageRect.height) / density
 
                     OverlayBubbleItem(
                         overlay = overlay,
                         userPreferences = userPreferences,
                         isSelected = isSelected,
-                        leftDp = leftDp.coerceAtLeast(10f),
-                        topDp = topDp.coerceAtLeast(10f),
+                        leftDp = leftDp.coerceAtLeast(0f),
+                        topDp = topDp.coerceAtLeast(0f),
                         widthDp = widthDp.coerceAtLeast(70f),
                         heightDp = heightDp.coerceAtLeast(35f),
                         onClick = {
@@ -335,12 +342,15 @@ private fun MangaPanelArtworkCanvas(
     }
 }
 
-@Composable
-private fun LocalDensityWidth(): Float {
-    return androidx.compose.ui.platform.LocalDensity.current.density
-}
-
-@Composable
-private fun LocalDensityHeight(): Float {
-    return androidx.compose.ui.platform.LocalDensity.current.density
+/** Area (in container pixels) where an image of [imageW] x [imageH] lands when drawn with ContentScale.Fit. */
+internal fun fittedImageRect(imageW: Int, imageH: Int, containerW: Float, containerH: Float): Rect {
+    if (imageW <= 0 || imageH <= 0 || containerW <= 0f || containerH <= 0f) {
+        return Rect(0f, 0f, containerW, containerH)
+    }
+    val scale = minOf(containerW / imageW, containerH / imageH)
+    val w = imageW * scale
+    val h = imageH * scale
+    val left = (containerW - w) / 2f
+    val top = (containerH - h) / 2f
+    return Rect(left, top, left + w, top + h)
 }
