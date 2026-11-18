@@ -28,6 +28,8 @@ jobs:
       # Optional: public backend that holds the OpenRouter key. Without it the user types their own
       # free OpenRouter key in the app settings. The key itself is NEVER embedded in a CI build.
       TRANSLATION_API_BASE_URL: ${{ secrets.TRANSLATION_API_BASE_URL }}
+      # Optional: must match MANGALENS_APP_TOKEN on the backend when the backend requires it.
+      TRANSLATION_API_TOKEN: ${{ secrets.TRANSLATION_API_TOKEN }}
 
     steps:
       - name: Checkout repository

@@ -5,14 +5,19 @@ import android.content.SharedPreferences
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Guards the OpenRouter free tier (20 requests/min, 50/day without credits): spaces requests out,
  * counts them per day and honours the cool-down returned by a 429.
+ *
+ * The day is the UTC day, because that is when OpenRouter resets the free quota (21:00 in Brasília);
+ * counting by the local day made the app block when the quota was already renewed, and vice versa.
  */
 class RequestBudget(
     context: Context,
-    private val dailyLimit: Int,
+    /** 0 = no app-side daily limit. Adjustable at runtime (Settings: "comprei créditos" = 1000/dia). */
+    @Volatile var dailyLimit: Int,
     private val minIntervalMillis: Long = 3_500L,
     private val clock: () -> Long = System::currentTimeMillis
 ) : RequestGate {
@@ -49,10 +54,15 @@ class RequestBudget(
         blockedUntil = maxOf(blockedUntil, timestampMillis)
     }
 
-    private fun today(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(clock()))
+    private fun today(): String = dayOf(clock())
 
-    private companion object {
-        const val KEY_DAY = "day"
-        const val KEY_COUNT = "count"
+    companion object {
+        private const val KEY_DAY = "day"
+        private const val KEY_COUNT = "count"
+
+        /** OpenRouter quota day ("yyyy-MM-dd" in UTC) for an epoch-millis timestamp. */
+        fun dayOf(timestampMillis: Long): String =
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                .format(Date(timestampMillis))
     }
 }

@@ -96,12 +96,14 @@ $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 - Nunca dispare requisições em loop: a detecção de mudança (`FrameThumbnail`) deve ignorar as regiões desenhadas pelo próprio app (bolha, cards, status bar).
 - Prefira OCR local + tradução de texto; o modo visão (imagem) só quando necessário.
 - Toda requisição passa pelo `RequestBudget` (20/min, limite diário) e pelos caches (`TextTranslationCache`, `PageCache`).
+- O dia do `RequestBudget` é o dia **UTC** (quando a OpenRouter zera a cota). O limite diário vem das Configurações (`dailyRequestLimit`: 50 grátis / 1000 com créditos).
+- O cache aproximado só aceita ruído de OCR (caractere perdido, `l`↔`1`, `o`↔`0`...); troca real de letra ("ele"/"ela") é outra frase e nunca reaproveita tradução.
 
 ---
 
 ## 🔤 Tradução e Ajuste nos Balões
 
-- `BlockTranslator` valida a resposta **por id**: ids desconhecidos/0-based, eco do original (CJK num alvo latino) e textos gigantes são rejeitados. Sem traduções válidas → 1 nova tentativa só com os faltantes e modelos rotacionados (`MAX_ATTEMPTS = 2`). Nunca trate "HTTP 200" como sucesso.
+- `BlockTranslator` valida a resposta **por id** — inclusive os parciais do streaming, que passam pelo mesmo `normalizeIds`: ids desconhecidos/0-based, eco do original (CJK num alvo latino) e textos gigantes são rejeitados. Sem traduções válidas → 1 nova tentativa só com os faltantes e modelos rotacionados (`MAX_ATTEMPTS = 2`). Nunca trate "HTTP 200" como sucesso.
 - O log `Página: ocr= cacheHits= solicitados= recebidos= válidos= exibidos=` é o diagnóstico oficial; não registre o texto dos balões.
 - `BubbleTextFitter` (Kotlin puro) escolhe card + fonte: busca binária do maior tamanho que cabe (altura, largura e sem partir palavras), crescendo o card em passos sem cobrir outros balões; overflow é explícito (card mais alto), nunca truncamento.
 - `TranslationOverlayLayer` desenha exatamente o `StaticLayout` medido (`StaticLayoutMeasurer`), nunca um `TextView` que re-quebre o texto.
@@ -110,6 +112,8 @@ $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 
 - `.github/workflows/build.yml`: testes + APK em push/PR; tag `v*` gera GitHub Release (`versionName` = tag via `-PVERSION_NAME`).
 - Nenhuma chave em builds de CI: o usuário cola a chave da OpenRouter em Configurações (`manga_lens_secrets`, excluído do backup).
+- `TRANSLATION_API_BASE_URL` não tem valor padrão: nunca volte a usar `10.0.2.2` como padrão (só existe no emulador). Backend público deve exigir `MANGALENS_APP_TOKEN` (app envia `X-MangaLens-Token` = `TRANSLATION_API_TOKEN`).
+- O histórico (Room, `AppDatabase.get`) recebe só traduções novas (`PageResult.fresh`) da bolha e da imagem de teste; fica limitado a `HISTORY_LIMIT` linhas.
 - Firebase/Google Services foram removidos (não eram usados); não reintroduza sem `google-services.json` válido.
 
 ## 🧪 Diretrizes de Teste

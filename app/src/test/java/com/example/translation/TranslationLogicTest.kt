@@ -40,6 +40,24 @@ class TranslationLogicTest {
     }
 
     @Test
+    fun `text cache accepts OCR noise but never a real letter change`() {
+        val cache = TextTranslationCache()
+        cache.put("pt>en", "Ele morreu ontem", "He died yesterday")
+        // A dropped character and an o/0 swap are classic OCR jitter between frames: same bubble.
+        assertEquals("He died yesterday", cache.get("pt>en", "Ele morreu ontm"))
+        assertEquals("He died yesterday", cache.get("pt>en", "Ele morreu 0ntem"))
+        // One different letter is a different sentence: reusing the translation would swap the gender.
+        assertNull(cache.get("pt>en", "Ela morreu ontem"))
+    }
+
+    @Test
+    fun `daily budget follows the UTC day used by OpenRouter`() {
+        // 2026-11-18 22:30 in Brasília (UTC-3) is already 2026-11-19 for OpenRouter's quota.
+        val brasilia2230 = 1_795_051_800_000L // 2026-11-19T01:30:00Z
+        assertEquals("2026-11-19", RequestBudget.dayOf(brasilia2230))
+    }
+
+    @Test
     fun `lines of one bubble are merged and noise is dropped`() {
         val blocks = listOf(
             OcrBlock("I can't believe", Box(100, 100, 300, 130), lineHeight = 30),

@@ -38,9 +38,14 @@ android {
     versionCode = localSetting("VERSION_CODE", "8").toIntOrNull() ?: 8
     versionName = localSetting("VERSION_NAME", "0.8")
 
-    // When OPENROUTER_API_KEY is set the app calls OpenRouter directly (personal testing).
-    // Otherwise it uses the backend proxy at TRANSLATION_API_BASE_URL, which holds the key.
-    buildConfigField("String", "TRANSLATION_API_BASE_URL", buildString(localSetting("TRANSLATION_API_BASE_URL", "http://10.0.2.2:8080")))
+    // Priority: key typed in the app > OPENROUTER_API_KEY (personal builds) > backend proxy.
+    // The backend URL is EMPTY by default: a release/CI APK without a backend must ask for the key instead of
+    // silently calling the emulator-only address 10.0.2.2. For a local backend on the emulator, put
+    // TRANSLATION_API_BASE_URL=http://10.0.2.2:8080 in local.properties (debug builds allow plain HTTP).
+    buildConfigField("String", "TRANSLATION_API_BASE_URL", buildString(localSetting("TRANSLATION_API_BASE_URL", "")))
+    // Shared secret checked by the backend (MANGALENS_APP_TOKEN). Not a real secret once the APK is public,
+    // but it keeps casual scrapers from spending the backend's OpenRouter quota.
+    buildConfigField("String", "TRANSLATION_API_TOKEN", buildString(localSetting("TRANSLATION_API_TOKEN", "")))
     buildConfigField("String", "OPENROUTER_API_KEY", buildString(localSetting("OPENROUTER_API_KEY", "")))
     buildConfigField(
       "String", "OPENROUTER_TEXT_MODELS",

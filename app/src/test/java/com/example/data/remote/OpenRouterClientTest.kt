@@ -67,6 +67,28 @@ class OpenRouterClientTest {
     }
 
     @Test
+    fun `without key and without backend it asks for the key instead of calling anything`() = runTest {
+        val client = OpenRouterClient(apiKey = "", httpClient = http(body = okBody), backendUrl = "")
+        assertFalse(client.isConfigured(null))
+        assertTrue(client.isConfigured("app-key"))
+        val result = client.complete(listOf("a:free"), "sys", "user")
+        assertEquals(OpenRouterClient.MISSING_KEY_MESSAGE, result.exceptionOrNull()?.message)
+        assertEquals(null, lastRequest) // no request was sent
+    }
+
+    @Test
+    fun `backend requests carry the app token and never an Authorization header`() = runTest {
+        val client = OpenRouterClient(
+            apiKey = "", httpClient = http(body = okBody),
+            backendUrl = "https://backend.example/v1/chat/completions", backendToken = "app-token"
+        )
+        client.complete(listOf("a:free"), "sys", "user").getOrThrow()
+        assertEquals("https://backend.example/v1/chat/completions", lastRequest!!.url.toString())
+        assertEquals("app-token", lastRequest!!.header(OpenRouterClient.APP_TOKEN_HEADER))
+        assertEquals(null, lastRequest!!.header("Authorization"))
+    }
+
+    @Test
     fun `openai dialect sends a single model`() = runTest {
         val client = OpenRouterClient(OpenRouterClient.OPENAI_URL, "k", http(body = okBody), ApiDialect.OPENAI)
         client.complete(listOf("gpt-4.1-mini"), "sys", "user", maxTokens = 700).getOrThrow()

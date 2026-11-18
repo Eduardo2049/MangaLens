@@ -1,6 +1,9 @@
 package com.example
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import com.example.service.MangaOverlayService
 import com.example.ui.reader.MangaReaderScreen
@@ -26,8 +30,8 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             val intent = Intent(this, MangaOverlayService::class.java).apply {
-                putExtra("EXTRA_RESULT_CODE", result.resultCode)
-                putExtra("EXTRA_RESULT_DATA", result.data)
+                putExtra(MangaOverlayService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(MangaOverlayService.EXTRA_RESULT_DATA, result.data)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
@@ -49,7 +53,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult(),
     ) {
         if (Settings.canDrawOverlays(this)) {
-            screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            launchScreenCapture()
         } else {
             Toast.makeText(
                 this,
@@ -59,6 +63,14 @@ class MainActivity : ComponentActivity() {
             screenCaptureResult?.invoke(false)
             screenCaptureResult = null
         }
+    }
+
+    // Android 13+: the notification shows the translator is running and how many requests were used today.
+    // Denying it does not block anything; the flow simply continues.
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        continueWithOverlayCheck()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +95,16 @@ class MainActivity : ComponentActivity() {
      */
     private fun requestScreenCaptureWithOverlayCheck(onResult: (Boolean) -> Unit) {
         screenCaptureResult = onResult
+        val needsNotificationPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (needsNotificationPermission) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            continueWithOverlayCheck()
+        }
+    }
+
+    private fun continueWithOverlayCheck() {
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(
                 this,
@@ -95,8 +117,22 @@ class MainActivity : ComponentActivity() {
             )
             overlayPermissionLauncher.launch(intent)
         } else {
-            screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            launchScreenCapture()
         }
+    }
+
+    /**
+     * Android 14+ lets the user share a single app. MangaLens must see the whole screen: sharing only one
+     * app (usually MangaLens itself, the app in front when the dialog opens) makes the reader invisible to
+     * the OCR and puts the coordinates out of sync, so the full-display capture is requested explicitly.
+     */
+    private fun launchScreenCapture() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            mediaProjectionManager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+        } else {
+            mediaProjectionManager.createScreenCaptureIntent()
+        }
+        screenCaptureLauncher.launch(intent)
     }
 }
 

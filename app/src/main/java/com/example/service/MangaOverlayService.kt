@@ -31,6 +31,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.graphics.toColorInt
 import com.example.MainActivity
+import com.example.data.local.AppDatabase
+import com.example.data.local.TranslationHistory
 import com.example.data.local.UserPreferencesRepository
 import com.example.data.model.TranslationMode
 import com.example.data.remote.RateLimitedException
@@ -79,9 +81,15 @@ class MangaOverlayService : Service() {
     private val captureManager by lazy { ScreenCaptureManager(this) }
     private val pipeline by lazy { TranslationPipeline(this) }
     private val prefsRepo by lazy { UserPreferencesRepository(this) }
+    private val historyDao by lazy { AppDatabase.get(this).translationHistoryDao() }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watchJob: Job? = null
     private var translateJob: Job? = null
+    /**
+     * Incremented for every translation started. Streamed results of an older (cancelled or superseded)
+     * translation compare their own number with this one, so they can never be drawn over a newer page.
+     */
+    private var translateGeneration = 0L
 
     private var autoEnabled = true
     private var lastSeenFrame = -1L
@@ -420,7 +428,7 @@ class MangaOverlayService : Service() {
             }
             return
         }
-        if (!prefs.isTranslationEnabled || !autoEnabled || prefs.translationMode == TranslationMode.MANUAL) {
+        if (!autoEnabled || prefs.translationMode == TranslationMode.MANUAL) {
             setStatus(idleStatus())
             return
         }
@@ -463,6 +471,8 @@ class MangaOverlayService : Service() {
 
     private fun translatePage(thumb: FrameThumbnail) {
         processedThumb = thumb
+        val generation = ++translateGeneration
+        fun isCurrent() = generation == translateGeneration && translateJob?.isActive == true
         translateJob = serviceScope.launch {
             clearTranslations()
             setStatus(Status.READING)
@@ -480,18 +490,22 @@ class MangaOverlayService : Service() {
                 setStatus(Status.TRANSLATING)
                 pipeline.translate(bitmap, prefs, exclusions) { ready ->
                     // Streamed results arrive on an IO thread; windows must be touched on the main thread.
-                    serviceScope.launch { if (translateJob?.isActive == true) showIfSamePage(thumb, ready, prefs) }
+                    serviceScope.launch { if (isCurrent()) showIfSamePage(thumb, ready, prefs) }
                 }
             } finally {
                 bitmap.recycle()
             }
             if (result.requestsSent > 0) updateUsageNotification()
+            saveToHistory(result.fresh, prefs)
 
             // If the user scrolled meanwhile, the results are cached but no longer belong on screen.
             if (!showIfSamePage(thumb, result.translations, prefs)) processedThumb = null
 
             when (val error = result.error) {
-                null -> setStatus(idleStatus())
+                null -> {
+                    if (result.requestsSent > 0) dailyLimitWarned = false
+                    setStatus(idleStatus())
+                }
                 is DailyLimitReachedException -> {
                     // Cached bubbles keep working; only new text is blocked until tomorrow.
                     setStatus(Status.LIMIT)
@@ -514,6 +528,23 @@ class MangaOverlayService : Service() {
                         Toast.LENGTH_LONG
                     ).show()
                 }
+            }
+        }
+    }
+
+    /** New bubbles (not cache hits) go to the history shown in the app. */
+    private fun saveToHistory(
+        fresh: List<com.example.translation.ScreenTranslation>,
+        prefs: com.example.data.local.UserPreferences
+    ) {
+        if (fresh.isEmpty()) return
+        val items = fresh.map { it.originalText to it.translatedText }
+        // Not tied to translateJob: a page that was already paid for is recorded even if the user scrolls on.
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                TranslationHistory.record(historyDao, items, prefs.sourceLanguage, prefs.targetLanguage, HISTORY_TITLE)
+            } catch (e: Exception) {
+                Log.e(TAG, "Histórico: ${e.message}")
             }
         }
     }
@@ -542,6 +573,7 @@ class MangaOverlayService : Service() {
         const val EXTRA_RESULT_DATA = "EXTRA_RESULT_DATA"
         private const val TAG = "MangaLens"
         private const val NOTIFICATION_ID = 1001
+        private const val HISTORY_TITLE = "Leitor (bolha flutuante)"
 
         private const val TICK_MS = 250L
         /** Time without motion before a page counts as "being read". */

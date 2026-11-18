@@ -131,7 +131,7 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
             x = rect.left
             y = rect.top
             // The system clamps untouchable overlays to 0.8 anyway; ask for it explicitly.
-            alpha = prefs.overlayOpacity.coerceIn(0.5f, MAX_UNTOUCHABLE_ALPHA)
+            alpha = prefs.overlayOpacity.coerceIn(UserPreferences.MIN_OVERLAY_OPACITY, UserPreferences.MAX_OVERLAY_OPACITY)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
@@ -179,6 +179,5 @@ class TranslationOverlayLayer(private val context: Context, private val windowMa
     private companion object {
         /** Below this the translation is unreadable on a phone; the card grows instead. */
         const val MIN_TEXT_SP = 8f
-        const val MAX_UNTOUCHABLE_ALPHA = 0.8f
     }
 }

@@ -49,7 +49,11 @@ class OpenRouterClient(
     private val endpoint: String? = null,
     private val apiKey: String = BuildConfig.OPENROUTER_API_KEY.trim(),
     private val httpClient: OkHttpClient = sharedHttpClient,
-    private val dialect: ApiDialect = ApiDialect.OPENROUTER
+    private val dialect: ApiDialect = ApiDialect.OPENROUTER,
+    /** Backend proxy endpoint; blank = no backend (the user must type an OpenRouter key). */
+    private val backendUrl: String = backendEndpoint(),
+    /** Sent as [APP_TOKEN_HEADER] to the backend, which may require it (MANGALENS_APP_TOKEN). */
+    private val backendToken: String = BuildConfig.TRANSLATION_API_TOKEN.trim()
 ) {
 
     val isConfigured: Boolean get() = isConfigured(null)
@@ -58,7 +62,7 @@ class OpenRouterClient(
 
     private fun effectiveKey(keyOverride: String?) = keyOverride?.trim()?.takeIf { it.isNotEmpty() } ?: apiKey
 
-    private fun endpointFor(key: String): String = endpoint ?: if (key.isNotEmpty()) OPENROUTER_URL else backendEndpoint()
+    private fun endpointFor(key: String): String = endpoint ?: if (key.isNotEmpty()) OPENROUTER_URL else backendUrl
 
     suspend fun complete(
         models: List<String>,
@@ -74,7 +78,7 @@ class OpenRouterClient(
         try {
             val key = effectiveKey(apiKeyOverride)
             val url = endpointFor(key)
-            if (url.isBlank()) throw IllegalStateException("Configure a chave da OpenRouter nas configurações do app")
+            if (url.isBlank()) throw IllegalStateException(MISSING_KEY_MESSAGE)
             val userContent: Any = if (image == null) {
                 userText
             } else {
@@ -111,7 +115,10 @@ class OpenRouterClient(
                 .url(url)
                 .header("Content-Type", "application/json")
                 .header("X-Title", "MangaLens")
-                .apply { if (key.isNotEmpty()) header("Authorization", "Bearer $key") }
+                .apply {
+                    if (key.isNotEmpty()) header("Authorization", "Bearer $key")
+                    else if (backendToken.isNotEmpty()) header(APP_TOKEN_HEADER, backendToken)
+                }
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -208,6 +215,8 @@ class OpenRouterClient(
         private const val MAX_FALLBACK_MODELS = 3
         const val OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
         const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+        const val APP_TOKEN_HEADER = "X-MangaLens-Token"
+        const val MISSING_KEY_MESSAGE = "Configure a chave da OpenRouter em Configurações → Chave da OpenRouter"
 
         val textModels: List<String> = parseModels(BuildConfig.OPENROUTER_TEXT_MODELS)
         val visionModels: List<String> = parseModels(BuildConfig.OPENROUTER_VISION_MODELS)
@@ -220,6 +229,9 @@ class OpenRouterClient(
         }
 
         fun usesDirectKey(): Boolean = BuildConfig.OPENROUTER_API_KEY.isNotBlank()
+
+        /** True when this build points at a MangaLens backend proxy (TRANSLATION_API_BASE_URL). */
+        fun hasBackend(): Boolean = backendEndpoint().isNotBlank()
 
         private val sharedHttpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()

@@ -58,6 +58,7 @@ import com.example.data.model.SupportedLanguage
 import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
 import com.example.data.remote.OpenRouterClient
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,7 +71,7 @@ fun SettingsBottomSheet(
     onUpdateOpacity: (Float) -> Unit,
     onUpdateFontSize: (Int) -> Unit,
     onUpdateBubbleStyle: (String) -> Unit,
-    onUpdateReadingMode: (String) -> Unit,
+    onUpdateDailyLimit: (Int) -> Unit = {},
     onUpdateTranslationMode: (TranslationMode) -> Unit = {},
     onUpdateTranslationEngine: (TranslationEngine) -> Unit = {},
     onSaveApiKey: (String) -> Unit = {}
@@ -132,15 +133,18 @@ fun SettingsBottomSheet(
                             onClick = { onUpdateTranslationEngine(engine) }
                         )
                     }
+                    val noKeyAnywhere = userPreferences.openRouterApiKey.isBlank() &&
+                        !OpenRouterClient.usesDirectKey() && !OpenRouterClient.hasBackend()
                     Text(
                         text = when {
                             userPreferences.openRouterApiKey.isNotBlank() ->
                                 "OpenRouter (chave do app) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
                             OpenRouterClient.usesDirectKey() ->
                                 "OpenRouter (chave do build) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
-                            else -> "OpenRouter via backend MangaLens"
+                            OpenRouterClient.hasBackend() -> "OpenRouter via backend MangaLens"
+                            else -> "Nenhuma chave configurada: cole sua chave da OpenRouter abaixo para traduzir"
                         },
-                        color = Color(0xFF64748B),
+                        color = if (noKeyAnywhere) Color(0xFFF87171) else Color(0xFF64748B),
                         fontSize = 11.sp,
                         modifier = Modifier.padding(top = 4.dp)
                     )
@@ -152,6 +156,21 @@ fun SettingsBottomSheet(
                         savedKey = userPreferences.openRouterApiKey,
                         onSave = onSaveApiKey
                     )
+                }
+
+                item {
+                    SettingsSectionTitle("Limite diário de requisições")
+                    listOf(
+                        UserPreferences.FREE_DAILY_LIMIT to "Plano grátis da OpenRouter",
+                        UserPreferences.CREDITS_DAILY_LIMIT to "Comprei créditos na OpenRouter (US$ 10 uma vez)"
+                    ).forEach { (limit, description) ->
+                        SettingsChoiceRow(
+                            title = "$limit por dia",
+                            description = description,
+                            selected = userPreferences.dailyRequestLimit == limit,
+                            onClick = { onUpdateDailyLimit(limit) }
+                        )
+                    }
                 }
 
                 // Opacity Slider
@@ -167,10 +186,11 @@ fun SettingsBottomSheet(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
+                        // Android ignores anything above 80% on overlays that let touches through to the reader.
                         Slider(
                             value = userPreferences.overlayOpacity,
                             onValueChange = onUpdateOpacity,
-                            valueRange = 0.5f..1.0f,
+                            valueRange = UserPreferences.MIN_OVERLAY_OPACITY..UserPreferences.MAX_OVERLAY_OPACITY,
                             colors = SliderDefaults.colors(
                                 thumbColor = Color(0xFF38BDF8),
                                 activeTrackColor = Color(0xFF0284C7),
@@ -180,12 +200,17 @@ fun SettingsBottomSheet(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "${(userPreferences.overlayOpacity * 100).toInt()}%",
+                            text = "${(userPreferences.overlayOpacity * 100).roundToInt()}%",
                             color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    Text(
+                        text = "Máximo de 80%: limite do Android para sobreposições que deixam o toque passar.",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp
+                    )
                 }
 
                 // Section 3: Font Size Selector

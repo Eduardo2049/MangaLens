@@ -38,15 +38,23 @@ class OcrEngine {
         }
     }
 
-    /** Runs the Japanese and Korean models (both also read Latin) and keeps the one that found its script. */
+    /**
+     * Runs the Japanese and Korean models (both also read Latin) and keeps the one that found its script.
+     * Ideographs without any kana mean Chinese (manhua): the Chinese model reads those far better.
+     */
     private suspend fun recognizeAuto(image: InputImage): List<OcrBlock> = coroutineScope {
         val ja = async { recognizeWith(japanese, image) }
         val ko = async { recognizeWith(korean, image) }
         val jaBlocks = ja.await()
         val koBlocks = ko.await()
         val hangul = koBlocks.sumOf { b -> b.text.count { it in HANGUL_SYLLABLES } }
-        val kanaKanji = jaBlocks.sumOf { b -> b.text.count { it in KANA || it in CJK_IDEOGRAPHS } }
-        if (hangul >= kanaKanji) koBlocks else jaBlocks
+        val kana = jaBlocks.sumOf { b -> b.text.count { it in KANA } }
+        val ideographs = jaBlocks.sumOf { b -> b.text.count { it in CJK_IDEOGRAPHS } }
+        when {
+            hangul >= kana + ideographs -> koBlocks
+            kana == 0 && ideographs >= MIN_CHINESE_IDEOGRAPHS -> recognizeWith(chinese, image)
+            else -> jaBlocks
+        }
     }
 
     private suspend fun recognizeWith(recognizer: TextRecognizer, image: InputImage): List<OcrBlock> {
@@ -75,6 +83,8 @@ class OcrEngine {
         val HANGUL_SYLLABLES = 0xAC00.toChar()..0xD7A3.toChar()
         val KANA = 0x3040.toChar()..0x30FF.toChar()
         val CJK_IDEOGRAPHS = 0x4E00.toChar()..0x9FFF.toChar()
+        /** A couple of stray ideographs (a logo, a SFX) are not enough to switch to the Chinese model. */
+        const val MIN_CHINESE_IDEOGRAPHS = 4
     }
 
     fun close() {

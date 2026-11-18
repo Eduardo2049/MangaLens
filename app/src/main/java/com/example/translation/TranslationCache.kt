@@ -18,22 +18,25 @@ class TextTranslationCache(private val maxEntries: Int = 600) {
         if (key.isEmpty()) return null
         entries["$languagePair|$key"]?.let { return it.translation }
 
-        // OCR of the same bubble can differ by a character between frames; accept near-identical text.
+        // OCR of the same bubble can differ by a character between frames; accept text that differs only
+        // the way OCR noise does (a dropped/extra character, l↔1, o↔0...). A real letter change such as
+        // "ele morreu" vs "ela morreu" is a different sentence and must NOT reuse the cached translation.
         if (key.length < 6) return null
         val prefix = "$languagePair|"
+        val allowance = ocrAllowance(key.length)
         var best: String? = null
-        var bestScore = 0f
+        var bestDistance = Float.MAX_VALUE
         for ((cachedKey, entry) in entries) {
             if (!cachedKey.startsWith(prefix)) continue
             val cachedText = cachedKey.substring(prefix.length)
-            if (abs(cachedText.length - key.length) > key.length / 8 + 1) continue
-            val score = similarity(cachedText, key)
-            if (score > bestScore) {
-                bestScore = score
+            if (abs(cachedText.length - key.length) > allowance) continue
+            val distance = ocrDistance(cachedText, key)
+            if (distance < bestDistance) {
+                bestDistance = distance
                 best = entry.translation
             }
         }
-        return if (bestScore >= FUZZY_MATCH_THRESHOLD) best else null
+        return if (bestDistance <= allowance) best else null
     }
 
     @Synchronized
@@ -55,28 +58,47 @@ class TextTranslationCache(private val maxEntries: Int = 600) {
     fun clear() = entries.clear()
 
     companion object {
-        private const val FUZZY_MATCH_THRESHOLD = 0.88f
+        /** Characters ML Kit commonly swaps between frames; substituting inside a group is cheap. */
+        private val CONFUSABLE_GROUPS = listOf("il1|!", "o0", "s5", "b8", "z2", "gq9", "uv", "ー一-")
+        private const val CONFUSABLE_COST = 0.5f
+        private const val INDEL_COST = 1f
+        /** Larger than any allowance: a real letter change disqualifies the match by itself. */
+        private const val OTHER_SUBSTITUTION_COST = 100f
+
+        /**
+         * How much OCR noise a text of [length] normalized characters may have and still be "the same bubble".
+         * Below 40 characters a single dropped character (or a few confusable swaps) is tolerated, but not a
+         * deletion+insertion pair, which is how a letter change could otherwise sneak in.
+         */
+        fun ocrAllowance(length: Int): Float = if (length < 40) 1.5f else length / 25f
+
+        private fun confusable(a: Char, b: Char): Boolean = CONFUSABLE_GROUPS.any { a in it && b in it }
+
+        /** Weighted edit distance where only OCR-like differences are cheap (see [ocrAllowance]). */
+        fun ocrDistance(a: String, b: String): Float {
+            if (a == b) return 0f
+            var prev = FloatArray(b.length + 1) { it * INDEL_COST }
+            var curr = FloatArray(b.length + 1)
+            for (i in 1..a.length) {
+                curr[0] = i * INDEL_COST
+                for (j in 1..b.length) {
+                    val x = a[i - 1]
+                    val y = b[j - 1]
+                    val cost = when {
+                        x == y -> 0f
+                        confusable(x, y) -> CONFUSABLE_COST
+                        else -> OTHER_SUBSTITUTION_COST
+                    }
+                    curr[j] = minOf(curr[j - 1] + INDEL_COST, prev[j] + INDEL_COST, prev[j - 1] + cost)
+                }
+                val tmp = prev; prev = curr; curr = tmp
+            }
+            return prev[b.length]
+        }
 
         fun normalize(text: String): String =
             text.lowercase().filter { it.isLetterOrDigit() || it in "!?…~♡♥" }
 
         private fun abs(v: Int) = if (v < 0) -v else v
-
-        /** 1 - normalized Levenshtein distance. */
-        fun similarity(a: String, b: String): Float {
-            if (a == b) return 1f
-            if (a.isEmpty() || b.isEmpty()) return 0f
-            var prev = IntArray(b.length + 1) { it }
-            var curr = IntArray(b.length + 1)
-            for (i in 1..a.length) {
-                curr[0] = i
-                for (j in 1..b.length) {
-                    val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                    curr[j] = minOf(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
-                }
-                val tmp = prev; prev = curr; curr = tmp
-            }
-            return 1f - prev[b.length].toFloat() / maxOf(a.length, b.length)
-        }
     }
 }
