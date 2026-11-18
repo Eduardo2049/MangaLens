@@ -13,8 +13,8 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
 - **Linguagem:** Kotlin (Target JVM 17)
 - **UI:** Jetpack Compose (Material 3)
 - **Arquitetura:** MVVM + Clean Architecture
-- **Banco de Dados:** Room
-- **Rede:** Retrofit + OkHttp + Moshi
+- **Banco de Dados:** Room (histórico); preferências em `SharedPreferences`
+- **Rede:** OkHttp + `org.json` (sem Retrofit/Moshi)
 - **IA:** OpenRouter (modelos `:free`) + OCR no aparelho (ML Kit Text Recognition)
 - **Testes:** JUnit, Robolectric, Roborazzi (Screenshot Testing)
 
@@ -26,7 +26,7 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
 | :--- | :--- | :--- |
 | **Gradle** | 9.3.1 | Wrapper configurado em `gradle/wrapper/gradle-wrapper.properties` |
 | **AGP** | 9.1.1 | Android Gradle Plugin (`com.android.application`) |
-| **JDK** | OpenJDK 17 (Full JDK com `jlink.exe`) | Eclipse Temurin 17 ou Microsoft OpenJDK 17 em `C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7` |
+| **JDK** | OpenJDK 17 (Full JDK com `jlink.exe`) | Eclipse Temurin 17 ou Microsoft OpenJDK 17 em `%USERPROFILE%\.jdk\jdk-17.0.12+7` |
 | **SDK** | compileSdk 35, targetSdk 35, minSdk 24 | Configurado em `app/build.gradle.kts` |
 | **core-ktx** | 1.15.0 | Versão compatível com `compileSdk 35` (em `gradle/libs.versions.toml`) |
 
@@ -38,13 +38,13 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
    - O Gradle requer um **JDK 17 completo (com `jlink.exe`)**. Não utilize o JDK 8 do sistema nem JBRs parciais/incompletos.
    - No terminal (PowerShell), defina sempre:
      ```powershell
-     $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+     $env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
      ```
 
 2. **Localização do Android SDK (`local.properties`):**
    - O arquivo `local.properties` (ignorado pelo Git) deve conter o caminho válido do SDK:
      ```properties
-     sdk.dir=C:/Users/eduardo.asousa/AppData/Local/Android/Sdk
+     sdk.dir=C:/Users/<seu-usuario>/AppData/Local/Android/Sdk
      ```
    - Para teste pessoal, a chave da OpenRouter também fica aqui (nunca em arquivos rastreados):
      ```properties
@@ -55,8 +55,7 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
    - Mantenha `// kotlin { jvmToolchain(17) }` comentado para que o Gradle utilize a JVM 17 informada no `JAVA_HOME` sem tentar transformações adicionais de toolchain.
 
 4. **Nome do APK Gerado:**
-   - O `app/build.gradle.kts` possui regra automática (`applicationVariants`) que gera o APK nomeado como:
-     `app/build/outputs/apk/debug/MangaLens-v1.0-debug.apk`
+   - O APK usa o nome padrão do AGP: `app/build/outputs/apk/debug/app-debug.apk` (no CI o artefato se chama `MangaLens-<versão>-debug`).
 
 5. **Plugins de Resolução:**
    - O plugin `foojay-resolver-convention` deve permanecer comentado em `settings.gradle.kts`.
@@ -71,13 +70,13 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
 
 ### 1. Gerar o APK Debug:
 ```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+$env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 .\gradlew.bat assembleDebug
 ```
 
 ### 2. Instalar Direto no Celular (Requer celular conectado via USB com Depuração USB ativada):
 ```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
+$env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 .\gradlew.bat installDebug
 ```
 
@@ -95,7 +94,7 @@ $env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
 
 - Nunca dispare requisições em loop: a detecção de mudança (`FrameThumbnail`) deve ignorar as regiões desenhadas pelo próprio app (bolha, cards, status bar).
 - Prefira OCR local + tradução de texto; o modo visão (imagem) só quando necessário.
-- Toda requisição passa pelo `RequestBudget` (20/min, limite diário) e pelos caches (`TextTranslationCache`, `PageCache`).
+- Toda requisição passa pelo `RequestBudget` (20/min, limite diário) e pelo cache `TextTranslationCache`.
 - O dia do `RequestBudget` é o dia **UTC** (quando a OpenRouter zera a cota). O limite diário vem das Configurações (`dailyRequestLimit`: 50 grátis / 1000 com créditos).
 - O cache aproximado só aceita ruído de OCR (caractere perdido, `l`↔`1`, `o`↔`0`...); troca real de letra ("ele"/"ela") é outra frase e nunca reaproveita tradução.
 

@@ -122,27 +122,27 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  implementation(libs.androidx.datastore.preferences)
+  // implementation(libs.androidx.datastore.preferences) // unused: preferences live in SharedPreferences
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
-  implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
+  // implementation(libs.coil.compose) // unused: no remote images are loaded
+  // implementation(libs.converter.moshi) // unused: the client is OkHttp + org.json
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
+  // implementation(libs.logging.interceptor) // unused: the client is OkHttp + org.json
   // On-device OCR: exact text positions for free, so only text (not images) goes to the LLM.
   implementation(libs.mlkit.text.recognition)
   implementation(libs.mlkit.text.recognition.japanese)
   implementation(libs.mlkit.text.recognition.korean)
   implementation(libs.mlkit.text.recognition.chinese)
-  implementation(libs.moshi.kotlin)
+  // implementation(libs.moshi.kotlin) // unused: the client is OkHttp + org.json
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
+  // implementation(libs.retrofit) // unused: the client is OkHttp + org.json
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -157,5 +157,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.moshi.kotlin.codegen) // unused: the client is OkHttp + org.json
 }

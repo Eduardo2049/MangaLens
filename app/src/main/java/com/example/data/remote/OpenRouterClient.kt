@@ -122,7 +122,14 @@ class OpenRouterClient(
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val content = httpClient.newCall(request).await().use { response ->
+            // The 60 s call limit would cut a long page that a slow free model is still streaming; for streams the
+            // whole call may take longer, while readTimeout (45 s without a single byte) still catches a stall.
+            val client = if (onText != null) {
+                httpClient.newBuilder().callTimeout(STREAM_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS).build()
+            } else {
+                httpClient
+            }
+            val content = client.newCall(request).await().use { response ->
                 if (response.code == 429) {
                     throw RateLimitedException(retryAfterMillis(response), "Limite de requisições da OpenRouter atingido")
                 }
@@ -216,6 +223,7 @@ class OpenRouterClient(
         const val OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
         const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"
         const val APP_TOKEN_HEADER = "X-MangaLens-Token"
+        private const val STREAM_CALL_TIMEOUT_SECONDS = 150L
         const val MISSING_KEY_MESSAGE = "Configure a chave da OpenRouter em Configurações → Chave da OpenRouter"
 
         val textModels: List<String> = parseModels(BuildConfig.OPENROUTER_TEXT_MODELS)

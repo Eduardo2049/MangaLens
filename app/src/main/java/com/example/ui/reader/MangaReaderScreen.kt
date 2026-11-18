@@ -1,7 +1,10 @@
 package com.example.ui.reader
 
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.TranslationHistory
+import com.example.translation.ScreenMath
 import com.example.service.MangaOverlayService
 import com.example.ui.components.LanguagePickerDialog
 import com.example.ui.components.MangaCanvasViewer
@@ -113,7 +117,7 @@ fun MangaReaderScreen(
     ) { uri ->
         uri?.let {
             val bitmap = try {
-                context.contentResolver.openInputStream(it)?.use { stream -> BitmapFactory.decodeStream(stream) }
+                decodeTestImage(context, it)
             } catch (e: Exception) {
                 null
             } catch (e: OutOfMemoryError) {
@@ -652,4 +656,19 @@ fun MangaReaderScreen(
             onSelectTarget = { viewModel.updateTargetLanguage(it) }
         )
     }
+}
+
+/** Largest test image kept in memory: 16 MP (64 MB) stays under Android's 100 MB limit for drawing a bitmap. */
+private const val MAX_TEST_IMAGE_PIXELS = 16_000_000L
+private const val MAX_TEST_IMAGE_SIDE = 16_384
+
+/** Decodes a picked image, sampled down when it is very large (long webtoon strips, 50 MP photos). */
+private fun decodeTestImage(context: Context, uri: Uri): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = ScreenMath.sampleSizeFor(bounds.outWidth, bounds.outHeight, MAX_TEST_IMAGE_PIXELS, MAX_TEST_IMAGE_SIDE)
+    }
+    return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
 }

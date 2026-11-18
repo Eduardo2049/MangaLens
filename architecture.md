@@ -1,158 +1,104 @@
-# MangaLens - Documentação de Arquitetura e Guia do Projeto
+# MangaLens — Arquitetura
 
-Este documento detalha a arquitetura técnica, fluxo de dados, estrutura de arquivos e instruções de compilação do **MangaLens**. Ele deve ser lido por **Agentes de IA** e desenvolvedores antes de efetuar qualquer modificação no código fonte.
+O MangaLens é um app Android (Kotlin, Jetpack Compose) que traduz mangás, manhwas e webtoons por cima de qualquer leitor. A tela é capturada com `MediaProjection`, o texto e a posição de cada balão vêm do OCR do aparelho (ML Kit) e só os textos novos vão para a OpenRouter (modelos `:free`). As traduções são desenhadas em janelas de sobreposição que deixam o toque passar para o leitor.
 
----
+Leia também o `agents.md` (regras do projeto) antes de alterar o código.
 
-## 1. 📌 Visão Geral do Projeto
-
-**MangaLens** é um aplicativo Android desenvolvido em Kotlin que permite a tradução de páginas e quadros de mangás em tempo real por meio de uma sobreposição flutuante (overlay).
-
-### Recursos Chave:
-- **Captura de Tela em Tempo Real:** Utiliza a API `MediaProjection` do Android.
-- **Processamento de IA (Gemini Visual Translator):** Utiliza o Google AI SDK (Gemini Multimodal) para reconhecer texto (OCR) e traduzir mantendo o contexto da leitura.
-- **Interface Flutuante (Window Manager Overlay):** `Foreground Service` que desenha caixas de tradução sobre qualquer leitor de mangá ou navegador.
-- **Leitor Integrado e Histórico:** Armazenamento local com Room Database e preferências com DataStore.
-
----
-
-## 2. 🏗️ Arquitetura do Sistema
-
-O projeto segue os princípios da **Clean Architecture** combinados com o padrão **MVVM (Model-View-ViewModel)** e **Android Foreground Services**.
+## 1. Fluxo de uma página
 
 ```mermaid
 flowchart TD
-    subgraph UI ["Camada de Apresentação (Jetpack Compose)"]
-        MA[MainActivity]
-        MRS[MangaReaderScreen]
-        MRVM[MangaReaderViewModel]
-        COMP[Floating Control Bar & Canvas]
+    subgraph App ["App (Compose)"]
+        MA[MainActivity<br/>permissões: notificação, sobreposição, captura]
+        MRS[MangaReaderScreen + ViewModel<br/>configurações, imagem de teste, histórico]
     end
 
-    subgraph Service ["Camada de Serviço (Background / Overlay)"]
-        MOS[MangaOverlayService]
-        WM[WindowManager Overlay UI]
-        MP[MediaProjection Capture]
+    subgraph Servico ["MangaOverlayService (foreground)"]
+        SCM[ScreenCaptureManager<br/>miniatura 36x64, 4x por segundo]
+        FT[FrameThumbnail<br/>tela parou em conteúdo novo?]
+        TOL[TranslationOverlayLayer<br/>um card por balão]
     end
 
-    subgraph Data ["Camada de Dados (Repository & Remote)"]
-        GVT[GeminiVisualTranslator]
-        UPR[UserPreferencesRepository - DataStore]
-        ADB[AppDatabase - Room]
+    subgraph Traducao ["translation/"]
+        TP[TranslationPipeline]
+        OCR[OcrEngine - ML Kit]
+        TR[TextRegions<br/>junta linhas do mesmo balão]
+        BT[BlockTranslator<br/>valida a resposta por id]
+        TC[TextTranslationCache]
+        RB[RequestBudget<br/>20/min, limite diário em UTC]
     end
 
-    MA --> MRS
-    MRS <--> MRVM
-    MRVM --> UPR
-    MRVM --> ADB
-    MRS -. Solicita Permissão .-> MP
-    MP --> MOS
-    MOS --> WM
-    MOS --> GVT
-    GVT -. Gemini API .-> Remote[Google AI Cloud]
+    ORC[OpenRouterClient<br/>chave do usuário ou backend opcional]
+    DB[(Room: histórico)]
+
+    MA --> SCM
+    SCM --> FT
+    FT -- "sim" --> TP
+    TP --> OCR --> TR --> BT
+    BT <--> TC
+    BT --> RB
+    BT --> ORC
+    ORC -. streaming .-> BT
+    BT --> TOL
+    TP -- "traduções novas" --> DB
+    MRS --> DB
 ```
 
----
+Quando a tela está parada numa página já tratada, nada roda: nem OCR, nem rede. Balões já traduzidos vêm do cache, e cada página com texto novo custa uma requisição só de texto (ou com imagem, no motor "OCR + IA vendo a imagem").
 
-## 3. 📂 Estrutura de Pacientes e Código Fonte
+## 2. Pacotes
 
-Todo o código principal do aplicativo está localizado no diretório: `app/src/main/java/com/example/`
+`app/src/main/java/com/example/`:
 
-```text
-com.example/
-├── MainActivity.kt               # Entrypoint, configuração do Jetpack Compose e solicitação de MediaProjection
-├── service/
-│   └── MangaOverlayService.kt    # Foreground Service que gerencia o WindowManager flutuante e captura de tela
-├── data/
-│   ├── model/
-│   │   └── Models.kt             # Data classes (BoundingBox, TranslationResult, HistoryItem, AppSettings)
-│   ├── local/
-│   │   ├── AppDatabase.kt        # Banco de dados Room para histórico de traduções
-│   │   └── UserPreferencesRepository.kt # DataStore para chaves de API, idioma alvo e configurações
-│   ├── remote/
-│   │   └── GeminiVisualTranslator.kt    # Cliente do Google AI SDK (Gemini) para OCR e tradução
-│   └── samples/
-│       └── SampleMangaData.kt    # Dados mockados para testes offline e preview no Compose
-└── ui/
-    ├── reader/
-    │   ├── MangaReaderScreen.kt  # Tela principal do leitor integrando controles e visualizador
-    │   └── MangaReaderViewModel.kt # ViewModel responsável pelo estado da UI e integração com repositórios
-    ├── components/
-    │   ├── FloatingControlBar.kt # Barra de controles flutuante sobreposta na tela
-    │   ├── FloatingHistoryPanel.kt # Painel flutuante com histórico recente
-    │   ├── MangaCanvasViewer.kt  # Canvas com zoom/pan e renderização das caixas de texto
-    │   └── SettingsBottomSheet.kt# Modal bottom sheet para configuração de API key e idiomas
-    └── theme/
-        ├── Color.kt              # Paleta de cores do Material 3
-        ├── Theme.kt              # Tema principal MangaLensTheme
-        └── Type.kt               # Tipografia e fontes
-```
+| Pacote | Arquivos | Papel |
+| --- | --- | --- |
+| raiz | `MainActivity.kt` | Pede notificação (13+), sobreposição e captura da tela inteira (14+) e inicia o serviço |
+| `service/` | `MangaOverlayService.kt` | Bolha flutuante, laço de detecção de mudança, status, notificação e histórico |
+| | `ScreenCaptureManager.kt` | `VirtualDisplay` + `ImageReader`; miniaturas baratas e bitmap só quando vai traduzir |
+| | `TranslationOverlayLayer.kt`, `StaticLayoutMeasurer.kt` | Desenha os cards com o mesmo `StaticLayout` que foi medido |
+| `translation/` | `TranslationPipeline.kt` | OCR → regiões → cache → API |
+| | `OcrEngine.kt`, `TextRegions.kt`, `Box.kt` | OCR (latim, japonês, coreano, chinês) e agrupamento dos balões |
+| | `BlockTranslator.kt`, `TranslationPrompts.kt` | Prompt, streaming, validação por id, nova tentativa |
+| | `TranslationCache.kt`, `RequestBudget.kt` | Cache tolerante a ruído de OCR e cota da OpenRouter |
+| | `BubbleTextFitter.kt`, `FrameThumbnail.kt`, `ScreenMath.kt` | Lógica pura (testada na JVM): tamanho da fonte, mudança de tela, limites de tela e imagem |
+| `data/remote/` | `OpenRouterClient.kt` | OkHttp + `org.json`; fallback de modelos, streaming SSE, 429 com `Retry-After` |
+| `data/local/` | `UserPreferencesRepository.kt` | Preferências em `SharedPreferences`; a chave fica em `manga_lens_secrets` (fora do backup) |
+| | `AppDatabase.kt`, `TranslationHistory.kt` | Histórico em Room (instância única, até 200 linhas) |
+| `ui/` | `reader/`, `components/`, `theme/` | Tela principal, configurações, pré-visualização da imagem de teste |
 
----
+Fora do app:
 
-## 4. 🛠️ Requisitos de Ambiente e Dependências
+- `back/`: proxy Node.js **opcional** que guarda a chave da OpenRouter num servidor. O projeto não tem backend em produção; sem `TRANSLATION_API_BASE_URL`, cada usuário cola a própria chave nas Configurações.
+- `.github/workflows/build.yml`: testes do backend e do app e APK de debug em push na `main`, `fix/**`, `feat/**` e em PRs; release com APK em tags `v*`.
 
-| Componente | Versão Requerida | Observações |
-| :--- | :--- | :--- |
-| **JDK** | Java 17+ (e.g. Temurin 17 / Microsoft OpenJDK 17) | Requer `jlink.exe` para o AGP 9.1+ |
-| **Android SDK** | compileSdk 35, minSdk 24, targetSdk 35 | Verifique `local.properties` com o caminho do SDK |
-| **Gradle** | 9.3.1+ | Executável `gradlew` / `gradlew.bat` no projeto |
-| **AGP** | 9.1.1 | Android Gradle Plugin |
+## 3. Compilar
 
----
+| Componente | Versão |
+| --- | --- |
+| JDK | 17 completo (com `jlink`) |
+| Android SDK | compileSdk 35, targetSdk 35, minSdk 24 |
+| Gradle / AGP | 9.3.1 / 9.1.1 |
 
-## 5. 🚀 Como Compilar e Gerar o APK Debug
-
-### Passo 1: Configurar Variáveis de Ambiente
-No terminal (PowerShell no Windows):
 ```powershell
-$env:JAVA_HOME="C:\Users\eduardo.asousa\.jdk\jdk-17.0.12+7"
-$env:ANDROID_HOME="C:\Users\eduardo.asousa\AppData\Local\Android\Sdk"
+$env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
+.\gradlew.bat :app:testDebugUnitTest
+.\gradlew.bat :app:assembleDebug
 ```
 
-### Passo 2: Garantir o arquivo `local.properties`
-Crie ou confirme se o arquivo `local.properties` existe na raiz do projeto:
-```properties
-sdk.dir=C:/Users/eduardo.asousa/AppData/Local/Android/Sdk
-```
+O `local.properties` (fora do Git) precisa de `sdk.dir=C:/Users/<seu-usuario>/AppData/Local/Android/Sdk`; para testes pessoais, também pode ter `OPENROUTER_API_KEY=...`. O APK sai em `app/build/outputs/apk/debug/`.
 
-### Passo 3: Executar a Compilação do APK
-Execute o comando Gradle para gerar o APK debug:
-```powershell
-.\gradlew.bat assembleDebug
-```
+## 4. Testar no celular
 
-### Passo 4: Localização do APK Gerado
-Após a compilação ser concluída com sucesso, o arquivo APK gerado estará em:
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+1. Instale o APK (permita "fontes desconhecidas").
+2. Em **Configurações → Chave da OpenRouter**, cole uma chave grátis de [openrouter.ai/keys](https://openrouter.ai/keys).
+3. Toque em **Ativar tradução automática** e aceite notificação, sobreposição e captura da tela inteira.
+4. Abra o leitor (Mihon, Komikku, Kotatsu...) e leia normalmente; a bolha mostra o status.
+5. Logs: `adb logcat -s MangaLens` (a linha `Página: ocr= cacheHits= ...` resume cada página).
 
----
+## 5. Regras para agentes de IA
 
-## 6. 📱 Como Testar no Celular (Passo a Passo)
-
-1. **Transferir o APK:**
-   - Conecte o celular via cabo USB e copie o arquivo `app-debug.apk` para a pasta *Downloads* do aparelho.
-   - Ou envie o arquivo `app-debug.apk` para você mesmo via WhatsApp, Telegram ou Google Drive.
-2. **Instalar no Celular:**
-   - Abra o gerenciador de arquivos do celular, toque em `app-debug.apk` e selecione **Instalar**.
-   - Se solicitado, autorize a opção **"Instalar de fontes desconhecidas"**.
-3. **Conceder Permissões no Celular:**
-   - **Sobrepor a outros apps (Overlay permission):** Ao abrir o app, autorize o MangaLens a ser exibido sobre outros aplicativos.
-   - **Captura de Tela (MediaProjection):** Ao iniciar o serviço de tradução, confirme a mensagem do sistema autorizando a captura de tela.
-4. **Configurar Chave da Gemini API:**
-   - No app, abra as configurações e cole sua **Gemini API Key**.
-   - Selecione o idioma de destino (ex: Português).
-5. **Testar Tradução Flutuante:**
-   - Abra qualquer aplicativo leitor de mangá ou site no navegador.
-   - Toque no botão flutuante para capturar a tela e visualizar as sobreposições traduzidas em tempo real.
-
----
-
-## ⚠️ Instruções Importantes para Agentes de IA
-
-1. **Leia `AGENTS.md` e `architecture.md` antes de efetuar alterações.**
-2. **Não commite arquivos de configuração local** (como `local.properties` ou caminhos absolutos) no repositório.
-3. **Mantenha os padrões de Jetpack Compose:** Nomeie Composables em `CamelCase` e coloque `modifier: Modifier = Modifier` como primeiro parâmetro opcional.
-4. **Sempre valide o build** executando `.\gradlew.bat assembleDebug` após alterações estruturais no código.
+1. Leia `agents.md` antes de alterar o código.
+2. Não commite `local.properties`, chaves nem caminhos absolutos do seu computador.
+3. Composables em `CamelCase`, com `modifier: Modifier = Modifier` como parâmetro opcional.
+4. Lógica nova que puder ser Kotlin puro vai em `translation/`, com teste JUnit.
+5. Valide com `:app:testDebugUnitTest` e `:app:assembleDebug`, ou deixe o CI da branch `fix/**` validar.
