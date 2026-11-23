@@ -10,6 +10,8 @@
 
 </div>
 
+<p align="center"><a href="https://eduardo2049.github.io/MangaLens/"><strong>Ver a página do projeto</strong></a></p>
+
 ---
 
 ## O que é
