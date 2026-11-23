@@ -396,7 +396,7 @@ fun LanguagePickerContent(
         Text(text = "Idiomas", color = LensColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         SegmentedChoice(
             options = listOf(
-                0 to "De: ${userPreferences.sourceLanguage.pickerName().substringBefore(" (")}",
+                0 to "De: ${if (userPreferences.sourceLanguage == SupportedLanguage.AUTO) "Detectar" else userPreferences.sourceLanguage.displayName.substringBefore(" (")}",
                 1 to "Para: ${userPreferences.targetLanguage.displayName.substringBefore(" (")}"
             ),
             selected = tab,
