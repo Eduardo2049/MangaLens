@@ -10,7 +10,10 @@
 
 </div>
 
-<p align="center"><a href="https://eduardo2049.github.io/MangaLens/"><strong>Ver a página do projeto</strong></a></p>
+<p align="center">
+  <a href="https://eduardo2049.github.io/MangaLens/"><img src="https://img.shields.io/badge/Abrir%20a%20p%C3%A1gina%20do%20projeto-22D3EE?style=for-the-badge&logo=googlechrome&logoColor=1B1740&labelColor=1B1740" alt="Abrir a página do projeto" /></a>
+  <a href="https://github.com/Eduardo2049/MangaLens/releases/latest"><img src="https://img.shields.io/badge/Baixar%20o%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=1B1740&labelColor=1B1740" alt="Baixar o APK" /></a>
+</p>
 
 ---
 
