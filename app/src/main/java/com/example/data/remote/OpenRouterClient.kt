@@ -36,7 +36,9 @@ enum class ApiDialect {
     /** OpenRouter: `models` fallback list and `reasoning` switch. */
     OPENROUTER,
     /** Plain OpenAI Chat Completions (also Groq, Together, local servers...): single `model`. */
-    OPENAI
+    OPENAI,
+    /** Gemini's OpenAI-compatible endpoint: single `model`, `max_tokens` and a low `reasoning_effort`. */
+    GEMINI
 }
 
 /**
@@ -53,7 +55,9 @@ class OpenRouterClient(
     /** Backend proxy endpoint; blank = no backend (the user must type an OpenRouter key). */
     private val backendUrl: String = backendEndpoint(),
     /** Sent as [APP_TOKEN_HEADER] to the backend, which may require it (MANGALENS_APP_TOKEN). */
-    private val backendToken: String = BuildConfig.TRANSLATION_API_TOKEN.trim()
+    private val backendToken: String = BuildConfig.TRANSLATION_API_TOKEN.trim(),
+    /** Shown in error messages ("OpenRouter: ...", "OpenAI: ...", "Google Gemini: ..."). */
+    private val providerName: String = "OpenRouter"
 ) {
 
     val isConfigured: Boolean get() = isConfigured(null)
@@ -97,25 +101,32 @@ class OpenRouterClient(
                         .put(JSONObject().put("role", "system").put("content", systemPrompt))
                         .put(JSONObject().put("role", "user").put("content", userContent))
                 )
-                .put("temperature", 0.3)
                 .put("response_format", JSONObject().put("type", "json_object"))
                 .put("stream", onText != null)
             when (dialect) {
                 ApiDialect.OPENROUTER -> body
+                    .put("temperature", 0.3)
                     .put("models", JSONArray(models.take(MAX_FALLBACK_MODELS)))
                     .put("max_tokens", maxTokens)
                     // Thinking adds latency and burns the free quota; translation does not need it.
                     .put("reasoning", JSONObject().put("enabled", false))
+                // No `temperature` here: OpenAI's reasoning models (GPT-5 family) reject anything but the default.
                 ApiDialect.OPENAI -> body
                     .put("model", models.first())
                     .put("max_completion_tokens", maxTokens)
+                ApiDialect.GEMINI -> body
+                    .put("temperature", 0.3)
+                    .put("model", models.first())
+                    // Gemini counts thinking tokens inside max_tokens; keep thinking short so the answer fits.
+                    .put("max_tokens", maxTokens)
+                    .put("reasoning_effort", "low")
             }
 
             val request = Request.Builder()
                 .url(url)
                 .header("Content-Type", "application/json")
-                .header("X-Title", "MangaLens")
                 .apply {
+                    if (dialect == ApiDialect.OPENROUTER) header("X-Title", "MangaLens")
                     if (key.isNotEmpty()) header("Authorization", "Bearer $key")
                     else if (backendToken.isNotEmpty()) header(APP_TOKEN_HEADER, backendToken)
                 }
@@ -131,7 +142,7 @@ class OpenRouterClient(
             }
             val content = client.newCall(request).await().use { response ->
                 if (response.code == 429) {
-                    throw RateLimitedException(retryAfterMillis(response), "Limite de requisições da OpenRouter atingido")
+                    throw RateLimitedException(retryAfterMillis(response), "Limite de requisições da $providerName atingido")
                 }
                 if (onText != null && response.isSuccessful) return@use readStream(response, onText)
                 val text = response.body?.string().orEmpty()
@@ -142,7 +153,7 @@ class OpenRouterClient(
                     if (error?.optInt("code") == 429) {
                         throw RateLimitedException(System.currentTimeMillis() + 30_000, message)
                     }
-                    throw IOException("OpenRouter: $message")
+                    throw IOException("$providerName: $message")
                 }
                 val choice = json?.optJSONArray("choices")?.optJSONObject(0)
                 // `content` is JSON null when the model only "thought"; optString would turn that into "null".
@@ -150,7 +161,7 @@ class OpenRouterClient(
                 val model = json?.optString("model")?.takeIf { it.isNotEmpty() }
                 Log.d(TAG, "model=$model finish=${choice?.optString("finish_reason")} " +
                     "tokens=${json?.optJSONObject("usage")?.optInt("total_tokens")}")
-                if (content.isBlank()) throw IOException("OpenRouter devolveu resposta vazia (modelo $model)")
+                if (content.isBlank()) throw IOException("$providerName devolveu resposta vazia (modelo $model)")
                 ChatReply(content, model)
             }
             Result.success(content)
@@ -166,7 +177,7 @@ class OpenRouterClient(
      * comments; an `error` object can arrive mid-stream when the provider fails after starting.
      */
     private suspend fun readStream(response: Response, onText: (String) -> Unit): ChatReply {
-        val source = response.body?.source() ?: throw IOException("OpenRouter devolveu resposta vazia")
+        val source = response.body?.source() ?: throw IOException("$providerName devolveu resposta vazia")
         val text = StringBuilder()
         var model: String? = null
         while (true) {
@@ -176,7 +187,7 @@ class OpenRouterClient(
             val data = line.removePrefix("data:").trim()
             if (data == "[DONE]") break
             val chunk = runCatching { JSONObject(data) }.getOrNull() ?: continue
-            chunk.optJSONObject("error")?.let { throw IOException("OpenRouter: ${it.optString("message")}") }
+            chunk.optJSONObject("error")?.let { throw IOException("$providerName: ${it.optString("message")}") }
             if (model == null) model = chunk.optString("model").takeIf { it.isNotEmpty() }
             // `content` is JSON null on the final chunk; optString would turn that into "null".
             val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")?.opt("content") as? String
@@ -186,7 +197,7 @@ class OpenRouterClient(
             }
         }
         Log.d(TAG, "model=$model stream chars=${text.length}")
-        if (text.isBlank()) throw IOException("OpenRouter devolveu resposta vazia (modelo $model)")
+        if (text.isBlank()) throw IOException("$providerName devolveu resposta vazia (modelo $model)")
         return ChatReply(text.toString(), model)
     }
 
@@ -222,6 +233,7 @@ class OpenRouterClient(
         private const val MAX_FALLBACK_MODELS = 3
         const val OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
         const val OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+        const val GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         const val APP_TOKEN_HEADER = "X-MangaLens-Token"
         private const val STREAM_CALL_TIMEOUT_SECONDS = 150L
         const val MISSING_KEY_MESSAGE = "Configure a chave da OpenRouter em Configurações → Chave da OpenRouter"

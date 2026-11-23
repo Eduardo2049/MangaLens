@@ -191,7 +191,9 @@ class MangaOverlayService : Service() {
     private fun updateUsageNotification() {
         val budget = pipeline.budget
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification("Requisições hoje: ${budget.usedToday}/${budget.limit}"))
+        manager.notify(NOTIFICATION_ID, buildNotification(
+            if (budget.limit > 0) "Requisições hoje: ${budget.usedToday}/${budget.limit}" else "Requisições hoje: ${budget.usedToday}"
+        ))
     }
 
     // ---------------------------------------------------------------- UI

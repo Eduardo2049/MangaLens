@@ -643,7 +643,9 @@ fun MangaReaderScreen(
             onUpdateDailyLimit = { viewModel.updateDailyRequestLimit(it) },
             onUpdateTranslationMode = { viewModel.setTranslationMode(it) },
             onUpdateTranslationEngine = { viewModel.setTranslationEngine(it) },
-            onSaveApiKey = { viewModel.updateOpenRouterApiKey(it) }
+            onUpdateProvider = { viewModel.updateProvider(it) },
+            onSaveApiKey = { provider, key -> viewModel.updateApiKey(provider, key) },
+            onSaveModel = { provider, model -> viewModel.updateModel(provider, model) }
         )
     }
 

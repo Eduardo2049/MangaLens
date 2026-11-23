@@ -15,6 +15,7 @@ import com.example.data.model.TextOverlay
 import com.example.data.model.BoundingBox
 import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
+import com.example.data.model.TranslationProvider
 import com.example.data.samples.MangaChapterSample
 import com.example.data.samples.SampleMangaData
 import com.example.translation.TranslationPipeline
@@ -206,8 +207,16 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
         prefsRepo.updateBubbleStyle(style)
     }
 
-    fun updateOpenRouterApiKey(key: String) {
-        prefsRepo.updateOpenRouterApiKey(key)
+    fun updateProvider(provider: TranslationProvider) {
+        prefsRepo.updateProvider(provider)
+    }
+
+    fun updateApiKey(provider: TranslationProvider, key: String) {
+        prefsRepo.updateApiKey(provider, key)
+    }
+
+    fun updateModel(provider: TranslationProvider, model: String) {
+        prefsRepo.updateModel(provider, model)
     }
 
     fun updateDailyRequestLimit(limit: Int) {
