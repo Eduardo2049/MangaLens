@@ -123,7 +123,8 @@ fun SettingsContent(
                     ChoiceRow(
                         title = option.title,
                         description = option.description,
-                        trailing = if (hasKey) "Chave salva" else "Sem chave",
+                        status = if (hasKey) "Chave salva" else "Sem chave",
+                        statusColor = if (hasKey) LensColors.Success else LensColors.TextMuted,
                         selected = selected == option,
                         onClick = { onUpdateProvider(option) }
                     )
@@ -370,6 +371,9 @@ fun LanguagePickerDialog(
     }
 }
 
+private fun SupportedLanguage.pickerName(): String =
+    if (this == SupportedLanguage.AUTO) "Detectar automaticamente" else displayName
+
 /** Source first, then target: picking the source moves on to the target instead of closing the sheet. */
 @Composable
 fun LanguagePickerContent(
@@ -391,7 +395,10 @@ fun LanguagePickerContent(
     ) {
         Text(text = "Idiomas", color = LensColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         SegmentedChoice(
-            options = listOf(0 to "Do idioma", 1 to "Para o idioma"),
+            options = listOf(
+                0 to "De: ${userPreferences.sourceLanguage.pickerName().substringBefore(" (")}",
+                1 to "Para: ${userPreferences.targetLanguage.displayName.substringBefore(" (")}"
+            ),
             selected = tab,
             onSelect = { tab = it }
         )
@@ -400,7 +407,7 @@ fun LanguagePickerContent(
         ChoiceGroup {
             options.forEach { language ->
                 ChoiceRow(
-                    title = language.displayName,
+                    title = language.pickerName(),
                     description = if (language == SupportedLanguage.AUTO) "Japonês, coreano, chinês ou inglês" else null,
                     selected = language == current,
                     onClick = {

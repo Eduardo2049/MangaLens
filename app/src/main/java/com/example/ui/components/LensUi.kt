@@ -165,7 +165,9 @@ fun ChoiceRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    trailing: String? = null
+    /** Short status under the description, e.g. whether a provider already has a key. */
+    status: String? = null,
+    statusColor: Color = LensColors.TextMuted
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
@@ -191,10 +193,15 @@ fun ChoiceRow(
                 if (description != null) {
                     Text(text = description, color = LensColors.TextMuted, fontSize = 13.sp, lineHeight = 18.sp)
                 }
-            }
-            if (trailing != null) {
-                Spacer(Modifier.width(8.dp))
-                Text(text = trailing, color = LensColors.TextMuted, fontSize = 12.sp, maxLines = 1)
+                if (status != null) {
+                    Text(
+                        text = status,
+                        color = statusColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
         }
     }
