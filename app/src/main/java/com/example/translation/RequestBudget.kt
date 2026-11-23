@@ -2,6 +2,7 @@ package com.example.translation
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.data.model.TranslationProvider
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,18 +19,27 @@ class RequestBudget(
     context: Context,
     /** 0 = no app-side daily limit. Adjustable at runtime (Settings: "comprei créditos" = 1000/dia). */
     @Volatile var dailyLimit: Int,
-    private val minIntervalMillis: Long = 3_500L,
+    /** Pause between requests; 3.5 s keeps OpenRouter's free tier (20/min) happy, paid providers can go faster. */
+    @Volatile var minIntervalMillis: Long = 3_500L,
     private val clock: () -> Long = System::currentTimeMillis
 ) : RequestGate {
     private val prefs: SharedPreferences = context.getSharedPreferences("manga_lens_budget", Context.MODE_PRIVATE)
     private var lastRequestAt = 0L
+
+    /** Each provider counts its own requests per day, so using OpenAI never eats the OpenRouter free quota. */
+    @Volatile
+    var provider: TranslationProvider = TranslationProvider.OPENROUTER
+
+    // OpenRouter keeps the original key names, so counts saved by earlier versions still apply.
+    private val keyDay: String get() = if (provider == TranslationProvider.OPENROUTER) KEY_DAY else "${KEY_DAY}_${provider.id}"
+    private val keyCount: String get() = if (provider == TranslationProvider.OPENROUTER) KEY_COUNT else "${KEY_COUNT}_${provider.id}"
 
     @Volatile
     var blockedUntil: Long = 0L
         private set
 
     val usedToday: Int
-        @Synchronized get() = if (prefs.getString(KEY_DAY, null) == today()) prefs.getInt(KEY_COUNT, 0) else 0
+        @Synchronized get() = if (prefs.getString(keyDay, null) == today()) prefs.getInt(keyCount, 0) else 0
 
     override val limit: Int get() = dailyLimit
 
@@ -45,8 +55,8 @@ class RequestBudget(
     override fun recordRequest() {
         lastRequestAt = clock()
         val day = today()
-        val count = if (prefs.getString(KEY_DAY, null) == day) prefs.getInt(KEY_COUNT, 0) else 0
-        prefs.edit().putString(KEY_DAY, day).putInt(KEY_COUNT, count + 1).apply()
+        val count = if (prefs.getString(keyDay, null) == day) prefs.getInt(keyCount, 0) else 0
+        prefs.edit().putString(keyDay, day).putInt(keyCount, count + 1).apply()
     }
 
     @Synchronized

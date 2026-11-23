@@ -6,6 +6,7 @@ import com.example.BuildConfig
 import com.example.data.model.SupportedLanguage
 import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
+import com.example.data.model.TranslationProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,11 +20,22 @@ data class UserPreferences(
     val overlayOpacity: Float = MAX_OVERLAY_OPACITY,
     val overlayFontSizeSp: Int = 13,
     val bubbleStyle: String = "SPEECH_BUBBLE", // SPEECH_BUBBLE, SOLID_HIGHLIGHT, SEMI_TRANSPARENT
-    /** OpenRouter key typed in the app (empty = build-time key or backend proxy). */
-    val openRouterApiKey: String = "",
+    /** Provider used for translations; the user can switch at any time. */
+    val provider: TranslationProvider = TranslationProvider.OPENROUTER,
+    /** Key typed in the app for each provider (an empty OpenRouter key falls back to the build key or backend). */
+    val apiKeys: Map<TranslationProvider, String> = emptyMap(),
+    /** Model chosen for each provider that uses a single model (OpenAI, Gemini). */
+    val customModels: Map<TranslationProvider, String> = emptyMap(),
     /** Requests per (UTC) day the app allows itself: 50 on the free tier, 1000 after buying credits once. */
     val dailyRequestLimit: Int = BuildConfig.OPENROUTER_DAILY_LIMIT
 ) {
+    fun keyFor(provider: TranslationProvider = this.provider): String = apiKeys[provider].orEmpty()
+
+    fun modelFor(provider: TranslationProvider = this.provider): String =
+        customModels[provider]?.takeIf { it.isNotBlank() } ?: provider.defaultModel
+
+    val openRouterApiKey: String get() = keyFor(TranslationProvider.OPENROUTER)
+
     companion object {
         const val MIN_OVERLAY_OPACITY = 0.5f
         /** System limit for untouchable overlay windows (Android 12+); anything above is ignored by Android. */
@@ -72,20 +84,38 @@ class UserPreferencesRepository(context: Context) {
             overlayOpacity = opacity,
             overlayFontSizeSp = fontSize,
             bubbleStyle = bubbleStyle,
-            openRouterApiKey = secrets.getString(KEY_OPENROUTER, "").orEmpty(),
+            provider = TranslationProvider.fromId(prefs.getString("provider", null)),
+            apiKeys = TranslationProvider.entries.associateWith { secrets.getString(keyName(it), "").orEmpty() },
+            customModels = TranslationProvider.entries.associateWith { prefs.getString(modelName(it), "").orEmpty() },
             dailyRequestLimit = dailyLimit
         )
     }
 
-    fun updateOpenRouterApiKey(key: String) {
+    fun updateApiKey(provider: TranslationProvider, key: String) {
         val clean = key.trim()
-        secrets.edit().putString(KEY_OPENROUTER, clean).apply()
-        _preferences.value = _preferences.value.copy(openRouterApiKey = clean)
+        secrets.edit().putString(keyName(provider), clean).apply()
+        _preferences.value = _preferences.value.copy(apiKeys = _preferences.value.apiKeys + (provider to clean))
+    }
+
+    fun updateOpenRouterApiKey(key: String) = updateApiKey(TranslationProvider.OPENROUTER, key)
+
+    fun updateProvider(provider: TranslationProvider) {
+        prefs.edit().putString("provider", provider.id).apply()
+        _preferences.value = _preferences.value.copy(provider = provider)
+    }
+
+    fun updateModel(provider: TranslationProvider, model: String) {
+        val clean = model.trim()
+        prefs.edit().putString(modelName(provider), clean).apply()
+        _preferences.value = _preferences.value.copy(customModels = _preferences.value.customModels + (provider to clean))
     }
 
     private companion object {
         const val SECRETS_FILE = "manga_lens_secrets"
-        const val KEY_OPENROUTER = "openrouter_api_key"
+
+        // OpenRouter keeps the key name used before there were several providers ("openrouter_api_key").
+        fun keyName(provider: TranslationProvider) = "${provider.id}_api_key"
+        fun modelName(provider: TranslationProvider) = "model_${provider.id}"
     }
 
     fun updateSourceLanguage(language: SupportedLanguage) {

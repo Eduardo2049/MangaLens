@@ -100,6 +100,40 @@ class OpenRouterClientTest {
     }
 
     @Test
+    fun `openai dialect leaves out temperature and fallback list`() = runTest {
+        val client = OpenRouterClient(OpenRouterClient.OPENAI_URL, "k", http(body = okBody), ApiDialect.OPENAI, providerName = "OpenAI")
+        client.complete(listOf("gpt-5.4-mini"), "sys", "user").getOrThrow()
+        val sent = sentJson()
+        assertFalse(sent.has("temperature")) // GPT-5 reasoning models reject anything but the default
+        assertFalse(sent.has("reasoning_effort"))
+        assertEquals(null, lastRequest!!.header("X-Title"))
+    }
+
+    @Test
+    fun `gemini dialect sends one model, max_tokens and low reasoning to the compatibility endpoint`() = runTest {
+        val client = OpenRouterClient(OpenRouterClient.GEMINI_URL, "AIza-key", http(body = okBody), ApiDialect.GEMINI, providerName = "Google Gemini")
+        client.complete(listOf("gemini-3.6-flash", "outro"), "sys", "user", maxTokens = 4096).getOrThrow()
+        val sent = sentJson()
+        assertEquals("gemini-3.6-flash", sent.getString("model"))
+        assertEquals(4096, sent.getInt("max_tokens"))
+        assertEquals("low", sent.getString("reasoning_effort"))
+        assertFalse(sent.has("models"))
+        assertFalse(sent.has("max_completion_tokens"))
+        assertEquals(OpenRouterClient.GEMINI_URL, lastRequest!!.url.toString())
+        assertEquals("Bearer AIza-key", lastRequest!!.header("Authorization"))
+    }
+
+    @Test
+    fun `errors name the provider that failed`() = runTest {
+        val client = OpenRouterClient(
+            OpenRouterClient.OPENAI_URL, "k",
+            http(body = """{"error":{"message":"Incorrect API key","code":"invalid_api_key"}}"""),
+            ApiDialect.OPENAI, providerName = "OpenAI"
+        )
+        assertEquals("OpenAI: Incorrect API key", client.complete(listOf("m"), "s", "u").exceptionOrNull()?.message)
+    }
+
+    @Test
     fun `null content is an error, not the string null`() = runTest {
         val body = """{"model":"m","choices":[{"message":{"content":null},"finish_reason":"length"}]}"""
         val result = OpenRouterClient(apiKey = "k", httpClient = http(body = body)).complete(listOf("a:free"), "s", "u")

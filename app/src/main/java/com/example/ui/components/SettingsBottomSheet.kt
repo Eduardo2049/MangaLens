@@ -57,6 +57,7 @@ import com.example.data.local.UserPreferences
 import com.example.data.model.SupportedLanguage
 import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
+import com.example.data.model.TranslationProvider
 import com.example.data.remote.OpenRouterClient
 import kotlin.math.roundToInt
 
@@ -74,7 +75,9 @@ fun SettingsBottomSheet(
     onUpdateDailyLimit: (Int) -> Unit = {},
     onUpdateTranslationMode: (TranslationMode) -> Unit = {},
     onUpdateTranslationEngine: (TranslationEngine) -> Unit = {},
-    onSaveApiKey: (String) -> Unit = {}
+    onUpdateProvider: (TranslationProvider) -> Unit = {},
+    onSaveApiKey: (TranslationProvider, String) -> Unit = { _, _ -> },
+    onSaveModel: (TranslationProvider, String) -> Unit = { _, _ -> }
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -133,11 +136,19 @@ fun SettingsBottomSheet(
                             onClick = { onUpdateTranslationEngine(engine) }
                         )
                     }
-                    val noKeyAnywhere = userPreferences.openRouterApiKey.isBlank() &&
-                        !OpenRouterClient.usesDirectKey() && !OpenRouterClient.hasBackend()
+                    val provider = userPreferences.provider
+                    val hasKey = userPreferences.keyFor(provider).isNotBlank()
+                    val noKeyAnywhere = !hasKey && (
+                        provider != TranslationProvider.OPENROUTER ||
+                            (!OpenRouterClient.usesDirectKey() && !OpenRouterClient.hasBackend())
+                        )
                     Text(
                         text = when {
-                            userPreferences.openRouterApiKey.isNotBlank() ->
+                            provider != TranslationProvider.OPENROUTER && hasKey ->
+                                "${provider.title} • ${userPreferences.modelFor(provider)}"
+                            provider != TranslationProvider.OPENROUTER ->
+                                "Nenhuma chave configurada: cole sua chave da ${provider.title} abaixo para traduzir"
+                            hasKey ->
                                 "OpenRouter (chave do app) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
                             OpenRouterClient.usesDirectKey() ->
                                 "OpenRouter (chave do build) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
@@ -151,14 +162,33 @@ fun SettingsBottomSheet(
                 }
 
                 item {
-                    SettingsSectionTitle("Chave da OpenRouter")
+                    SettingsSectionTitle("Provedor de tradução")
+                    TranslationProvider.entries.forEach { option ->
+                        val saved = userPreferences.keyFor(option).isNotBlank()
+                        SettingsChoiceRow(
+                            title = option.title,
+                            description = option.description + if (saved) " • chave salva" else " • sem chave",
+                            selected = userPreferences.provider == option,
+                            onClick = { onUpdateProvider(option) }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val selected = userPreferences.provider
                     ApiKeyField(
-                        savedKey = userPreferences.openRouterApiKey,
-                        onSave = onSaveApiKey
+                        provider = selected,
+                        savedKey = userPreferences.keyFor(selected),
+                        onSave = { onSaveApiKey(selected, it) }
                     )
+                    if (selected.usesChosenModel) {
+                        ModelField(
+                            provider = selected,
+                            savedModel = userPreferences.customModels[selected].orEmpty(),
+                            onSave = { onSaveModel(selected, it) }
+                        )
+                    }
                 }
 
-                item {
+                if (userPreferences.provider.hasFreeTierLimit) item {
                     SettingsSectionTitle("Limite diário de requisições")
                     listOf(
                         UserPreferences.FREE_DAILY_LIMIT to "Plano grátis da OpenRouter",
@@ -451,17 +481,19 @@ private fun SettingsChoiceRow(
 /** Key typed once on the phone, so a CI-built APK works without embedding any secret. */
 @Composable
 private fun ApiKeyField(
+    provider: TranslationProvider,
     savedKey: String,
     onSave: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var draft by remember(savedKey) { mutableStateOf(savedKey) }
+    // Keyed by provider as well: switching provider must not leave the previous provider's draft on screen.
+    var draft by remember(provider, savedKey) { mutableStateOf(savedKey) }
     Column(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it.trim() },
             singleLine = true,
-            placeholder = { Text("sk-or-v1-…", color = Color(0xFF64748B)) },
+            placeholder = { Text(provider.keyPlaceholder, color = Color(0xFF64748B)) },
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
@@ -471,7 +503,7 @@ private fun ApiKeyField(
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if (savedKey.isBlank()) "Grátis em openrouter.ai/keys • fica só neste aparelho" else "Chave salva neste aparelho",
+                text = if (savedKey.isBlank()) "${provider.keyHelp} • fica só neste aparelho" else "Chave da ${provider.title} salva neste aparelho",
                 color = Color(0xFF64748B),
                 fontSize = 11.sp,
                 modifier = Modifier.weight(1f)
@@ -480,6 +512,44 @@ private fun ApiKeyField(
                 TextButton(onClick = { onSave("") }) { Text("Remover", color = Color(0xFFF87171)) }
             }
             TextButton(onClick = { onSave(draft) }, enabled = draft != savedKey) {
+                Text("Salvar", color = Color(0xFF38BDF8))
+            }
+        }
+    }
+}
+
+/** Model name for providers that use a single model; empty = the provider's default. */
+@Composable
+private fun ModelField(
+    provider: TranslationProvider,
+    savedModel: String,
+    onSave: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var draft by remember(provider, savedModel) { mutableStateOf(savedModel) }
+    Column(modifier = modifier.fillMaxWidth().padding(top = 8.dp)) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it.trim() },
+            singleLine = true,
+            label = { Text("Modelo", color = Color(0xFF64748B)) },
+            placeholder = { Text(provider.defaultModel, color = Color(0xFF64748B)) },
+            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("model_field")
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (savedModel.isBlank()) "Usando o padrão: ${provider.defaultModel}" else "Usando o modelo escolhido",
+                color = Color(0xFF64748B),
+                fontSize = 11.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (savedModel.isNotBlank()) {
+                TextButton(onClick = { onSave("") }) { Text("Padrão", color = Color(0xFFF87171)) }
+            }
+            TextButton(onClick = { onSave(draft) }, enabled = draft != savedModel) {
                 Text("Salvar", color = Color(0xFF38BDF8))
             }
         }

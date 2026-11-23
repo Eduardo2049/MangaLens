@@ -79,6 +79,18 @@ Estados: `AUTO ●` (ativo), `AGUARDANDO...` (tela em movimento), `LENDO...` (OC
 
 Em **Configurações** escolha o modo (Automático/Manual) e o motor (OCR + texto, ou IA lê a imagem).
 
+## Usar OpenAI ou Gemini (opcional)
+
+Além da OpenRouter, o app pode traduzir com a sua própria chave da **OpenAI** ou do **Google Gemini**. Em **Configurações → Provedor de tradução**, toque no provedor que quiser usar e cole a chave dele. Cada provedor guarda a própria chave só no aparelho (fora do backup), então dá para trocar de um para outro a qualquer momento, sem digitar de novo. As traduções já feitas ficam no cache e continuam valendo depois da troca.
+
+| Provedor | Onde criar a chave | Modelo padrão | Observação |
+|---|---|---|---|
+| OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys) | lista de modelos `:free` | Limite diário de 50 (ou 1000 com créditos) controlado pelo app. |
+| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | `gpt-5.4-mini` | Cobrado por uso. É uma chave da API; a assinatura do ChatGPT ou do Codex não vale como chave. |
+| Google Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-3.6-flash` | Tem faixa gratuita com limites do Google. |
+
+Para OpenAI e Gemini dá para escrever o nome de outro modelo no campo **Modelo**; vazio usa o padrão. Os nomes mudam com o tempo, então confira a lista atual no site do provedor. Nesses provedores o app não impõe limite diário (quem limita e cobra é o provedor); a contagem de "Requisições hoje" é separada por provedor.
+
 ## Configurar a OpenRouter
 
 **APK baixado de uma Release:** abra **Configurações → Chave da OpenRouter**, cole a chave criada em [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) e toque em **Salvar**. A chave fica só no aparelho (excluída do backup) e tem prioridade sobre qualquer outra configuração.
