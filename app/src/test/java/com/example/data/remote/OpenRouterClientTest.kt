@@ -134,6 +134,30 @@ class OpenRouterClientTest {
     }
 
     @Test
+    fun `openai stream with role-only first chunk and usage-only last chunk is read`() = runTest {
+        val sse = listOf(
+            """data: {"id":"c1","model":"gpt-6-luna","choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"finish_reason":null}]}""",
+            """data: {"id":"c1","model":"gpt-6-luna","choices":[{"index":0,"delta":{"content":"{\"t\":[[1,\"Oi\"],"},"finish_reason":null}]}""",
+            """data: {"id":"c1","model":"gpt-6-luna","choices":[{"index":0,"delta":{"content":"[2,\"Tchau\"]]}"},"finish_reason":null}]}""",
+            """data: {"id":"c1","model":"gpt-6-luna","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""",
+            """data: {"id":"c1","model":"gpt-6-luna","choices":[],"usage":{"total_tokens":42}}""",
+            "data: [DONE]"
+        ).joinToString("\n\n")
+        val client = OpenRouterClient(OpenRouterClient.OPENAI_URL, "k", http(body = sse), ApiDialect.OPENAI, providerName = "OpenAI")
+        val reply = client.complete(listOf("gpt-6-luna"), "s", "u", onText = {}).getOrThrow()
+        assertEquals("""{"t":[[1,"Oi"],[2,"Tchau"]]}""", reply.content)
+    }
+
+    @Test
+    fun `openai without credits is a clear error, not a rate limit to wait for`() = runTest {
+        val body = """{"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}"""
+        val client = OpenRouterClient(OpenRouterClient.OPENAI_URL, "k", http(429, body), ApiDialect.OPENAI, providerName = "OpenAI")
+        val error = client.complete(listOf("m"), "s", "u").exceptionOrNull()
+        assertFalse(error is RateLimitedException)
+        assertTrue(error?.message.orEmpty().contains("sem créditos"))
+    }
+
+    @Test
     fun `null content is an error, not the string null`() = runTest {
         val body = """{"model":"m","choices":[{"message":{"content":null},"finish_reason":"length"}]}"""
         val result = OpenRouterClient(apiKey = "k", httpClient = http(body = body)).complete(listOf("a:free"), "s", "u")
