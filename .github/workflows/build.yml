@@ -82,7 +82,17 @@ jobs:
 
       # ── App: unit tests (translation pipeline, bubble fitting, client) + debug APK ──
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        # Screenshot tests (ScreenshotTest) also record the app screens at phone sizes.
+        run: ./gradlew :app:testDebugUnitTest -Proborazzi.test.record=true --stacktrace
+
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: app/build/outputs/roborazzi/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload test reports
         if: failure()
