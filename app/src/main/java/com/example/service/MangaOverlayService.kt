@@ -14,7 +14,9 @@ import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.util.TypedValue
@@ -30,17 +32,21 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.graphics.toColorInt
+import com.example.AppVisibility
 import com.example.MainActivity
 import com.example.data.local.AppDatabase
 import com.example.data.local.TranslationHistory
 import com.example.data.local.UserPreferencesRepository
 import com.example.data.model.TranslationMode
 import com.example.data.remote.RateLimitedException
+import com.example.diagnostics.CrashReporter
 import com.example.translation.Box
 import com.example.translation.DailyLimitReachedException
 import com.example.translation.FrameThumbnail
 import com.example.translation.ScreenMath
 import com.example.translation.TranslationPipeline
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -83,7 +89,16 @@ class MangaOverlayService : Service() {
     private val pipeline by lazy { TranslationPipeline(this) }
     private val prefsRepo by lazy { UserPreferencesRepository(this) }
     private val historyDao by lazy { AppDatabase.get(this).translationHistoryDao() }
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    /**
+     * Last line of defence: an exception that escapes a coroutine used to take the whole app down (the
+     * translator runs in the app's process). Now it is recorded, shown as an error and the bubble stays.
+     */
+    private val errorHandler = CoroutineExceptionHandler { _, error ->
+        // May run on an IO thread (history); windows and toasts must be touched on the main thread.
+        mainHandler.post { onUnexpectedError("tradutor flutuante", error) }
+    }
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + errorHandler)
     private var watchJob: Job? = null
     private var translateJob: Job? = null
     /**
@@ -303,7 +318,11 @@ class MangaOverlayService : Service() {
                     if (moved) keepBubbleOnScreen()
                     if (!moved) {
                         v.performClick()
-                        if (System.currentTimeMillis() - downAt >= LONG_PRESS_MS) onLongPress() else onTap()
+                        try {
+                            if (System.currentTimeMillis() - downAt >= LONG_PRESS_MS) onLongPress() else onTap()
+                        } catch (e: Exception) {
+                            onUnexpectedError("toque na bolha", e)
+                        }
                     }
                     true
                 }
@@ -359,6 +378,20 @@ class MangaOverlayService : Service() {
         }
     }
 
+    /** Records an unexpected error and keeps the translator alive instead of closing the app. */
+    private fun onUnexpectedError(where: String, error: Throwable) {
+        if (error is CancellationException) return
+        CrashReporter.recordHandled(this, where, error)
+        clearTranslations()
+        setStatus(Status.ERROR)
+        val name = error::class.java.simpleName.ifBlank { "Erro" }
+        Toast.makeText(
+            this,
+            "Erro inesperado: $name. Os detalhes ficam no app MangaLens.\nSegure a bolha para tentar de novo.",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
     private fun clearTranslations() {
         overlayLayer?.clear()
         displayedThumb = null
@@ -410,6 +443,14 @@ class MangaOverlayService : Service() {
             processedThumb = null
         }
 
+        if (AppVisibility.isAppInFront) {
+            // Our own screen is in front: nothing to translate. The page is re-checked when the user leaves.
+            if (overlayLayer?.isShowing == true) clearTranslations()
+            processedThumb = null
+            pageHandled = false
+            return
+        }
+
         val frame = captureManager.frameCount
         val frameChanged = frame != lastSeenFrame
         // Nothing was redrawn and this page is already handled: no work at all.
@@ -453,6 +494,10 @@ class MangaOverlayService : Service() {
     }
 
     private fun translateNow(force: Boolean) {
+        if (AppVisibility.isAppInFront) {
+            Toast.makeText(this, "Abra o seu leitor de mangá para traduzir", Toast.LENGTH_SHORT).show()
+            return
+        }
         val thumb = captureManager.captureThumbnail(THUMB_COLS, THUMB_ROWS, ownRegions(), statusBarPx)
         if (thumb == null) {
             Toast.makeText(this, "Aguardando primeira imagem da tela…", Toast.LENGTH_SHORT).show()
@@ -491,60 +536,70 @@ class MangaOverlayService : Service() {
         val generation = ++translateGeneration
         fun isCurrent() = generation == translateGeneration && translateJob?.isActive == true
         translateJob = serviceScope.launch {
-            clearTranslations()
-            setStatus(Status.READING)
-            // Give the window manager a frame to remove the old cards before grabbing the screen.
-            delay(80)
-            val prefs = prefsRepo.preferences.value
-            val exclusions = ownRegions() + Box(0, 0, captureManager.width, statusBarPx)
-            val bitmap = withContext(Dispatchers.Default) { captureManager.captureBitmap() }
-            if (bitmap == null) {
-                processedThumb = null
+            try {
+                runTranslation(thumb, ::isCurrent)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // OutOfMemoryError included: a failed page must not close the app. The page stays marked as
+                // handled, so the same error is not retried in a loop; scrolling or holding the bubble retries.
+                onUnexpectedError("tradução da página", e)
+            }
+        }
+    }
+
+    private suspend fun runTranslation(thumb: FrameThumbnail, isCurrent: () -> Boolean) {
+        clearTranslations()
+        setStatus(Status.READING)
+        // Give the window manager a frame to remove the old cards before grabbing the screen.
+        delay(80)
+        val prefs = prefsRepo.preferences.value
+        val exclusions = ownRegions() + Box(0, 0, captureManager.width, statusBarPx)
+        val bitmap = withContext(Dispatchers.Default) { captureManager.captureBitmap() }
+        if (bitmap == null) {
+            processedThumb = null
+            setStatus(idleStatus())
+            return
+        }
+        setStatus(Status.TRANSLATING)
+        // The bitmap is not recycled by hand: when a translation is cancelled, ML Kit may still be reading
+        // it on its own thread, and a recycled bitmap there crashes the app. The GC frees it safely.
+        val result = pipeline.translate(bitmap, prefs, exclusions) { ready ->
+            // Streamed results arrive on an IO thread; windows must be touched on the main thread.
+            serviceScope.launch { if (isCurrent()) showIfSamePage(thumb, ready, prefs) }
+        }
+        if (result.requestsSent > 0) updateUsageNotification()
+        saveToHistory(result.fresh, prefs)
+
+        // If the user scrolled meanwhile, the results are cached but no longer belong on screen.
+        if (!showIfSamePage(thumb, result.translations, prefs)) processedThumb = null
+
+        when (val error = result.error) {
+            null -> {
+                if (result.requestsSent > 0) dailyLimitWarned = false
                 setStatus(idleStatus())
-                return@launch
             }
-            val result = try {
-                setStatus(Status.TRANSLATING)
-                pipeline.translate(bitmap, prefs, exclusions) { ready ->
-                    // Streamed results arrive on an IO thread; windows must be touched on the main thread.
-                    serviceScope.launch { if (isCurrent()) showIfSamePage(thumb, ready, prefs) }
+            is DailyLimitReachedException -> {
+                // Cached bubbles keep working; only new text is blocked until tomorrow.
+                setStatus(Status.LIMIT)
+                if (!dailyLimitWarned) {
+                    dailyLimitWarned = true
+                    Toast.makeText(this@MangaOverlayService, error.message, Toast.LENGTH_LONG).show()
                 }
-            } finally {
-                bitmap.recycle()
             }
-            if (result.requestsSent > 0) updateUsageNotification()
-            saveToHistory(result.fresh, prefs)
-
-            // If the user scrolled meanwhile, the results are cached but no longer belong on screen.
-            if (!showIfSamePage(thumb, result.translations, prefs)) processedThumb = null
-
-            when (val error = result.error) {
-                null -> {
-                    if (result.requestsSent > 0) dailyLimitWarned = false
-                    setStatus(idleStatus())
-                }
-                is DailyLimitReachedException -> {
-                    // Cached bubbles keep working; only new text is blocked until tomorrow.
-                    setStatus(Status.LIMIT)
-                    if (!dailyLimitWarned) {
-                        dailyLimitWarned = true
-                        Toast.makeText(this@MangaOverlayService, error.message, Toast.LENGTH_LONG).show()
-                    }
-                }
-                is RateLimitedException -> {
-                    setStatus(Status.LIMIT)
-                    retryAt = error.retryAfterMillis
-                    val seconds = ((error.retryAfterMillis - System.currentTimeMillis()) / 1000).coerceAtLeast(1)
-                    Toast.makeText(this@MangaOverlayService, "Limite da API: tentando de novo em ${seconds}s", Toast.LENGTH_SHORT).show()
-                }
-                else -> {
-                    setStatus(Status.ERROR)
-                    Toast.makeText(
-                        this@MangaOverlayService,
-                        (error.message ?: "Falha na tradução") + "\nSegure a bolha para tentar de novo.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+            is RateLimitedException -> {
+                setStatus(Status.LIMIT)
+                retryAt = error.retryAfterMillis
+                val seconds = ((error.retryAfterMillis - System.currentTimeMillis()) / 1000).coerceAtLeast(1)
+                Toast.makeText(this@MangaOverlayService, "Limite da API: tentando de novo em ${seconds}s", Toast.LENGTH_SHORT).show()
+            }
+            else -> {
+                setStatus(Status.ERROR)
+                Toast.makeText(
+                    this@MangaOverlayService,
+                    (error.message ?: "Falha na tradução") + "\nSegure a bolha para tentar de novo.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -569,10 +624,14 @@ class MangaOverlayService : Service() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         // Dark mode, font scale or locale changes also land here; only a new screen size invalidates the page.
-        if (captureManager.onDisplayChanged()) {
-            clearTranslations()
-            resetPageState()
-            keepBubbleOnScreen()
+        try {
+            if (captureManager.onDisplayChanged()) {
+                clearTranslations()
+                resetPageState()
+                keepBubbleOnScreen()
+            }
+        } catch (e: Exception) {
+            onUnexpectedError("mudança de tela", e)
         }
     }
 

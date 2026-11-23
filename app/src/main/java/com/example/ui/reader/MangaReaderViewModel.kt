@@ -18,7 +18,11 @@ import com.example.data.model.TranslationMode
 import com.example.data.model.TranslationProvider
 import com.example.data.samples.MangaChapterSample
 import com.example.data.samples.SampleMangaData
+import com.example.diagnostics.CrashReporter
+import com.example.diagnostics.ProblemReport
 import com.example.translation.TranslationPipeline
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
@@ -27,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class MangaUiState(
     val chapters: List<MangaChapterSample> = SampleMangaData.samples,
@@ -42,7 +47,9 @@ data class MangaUiState(
     val isOverlayPermissionGranted: Boolean = false,
     val userPreferences: UserPreferences = UserPreferences(),
     val historyList: List<TranslationHistoryEntity> = emptyList(),
-    val statusMessage: String? = null
+    val statusMessage: String? = null,
+    /** Last crash or unexpected error, shown until the user dismisses it. */
+    val problemReport: ProblemReport? = null
 )
 
 class MangaReaderViewModel(application: Application) : AndroidViewModel(application) {
@@ -81,6 +88,16 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
         // Initial overlay load
         loadActiveOverlays()
+
+        viewModelScope.launch {
+            val report = withContext(Dispatchers.IO) { runCatching { CrashReporter.pending(application) }.getOrNull() }
+            _uiState.value = _uiState.value.copy(problemReport = report)
+        }
+    }
+
+    fun dismissProblemReport() {
+        CrashReporter.dismiss(getApplication())
+        _uiState.value = _uiState.value.copy(problemReport = null)
     }
 
     fun setCustomBitmap(bitmap: Bitmap?) {
@@ -126,7 +143,18 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
             val bitmapToProcess = _uiState.value.customBitmap
 
             if (bitmapToProcess != null) {
-                val result = pipeline.translate(bitmapToProcess, prefs)
+                val result = try {
+                    pipeline.translate(bitmapToProcess, prefs)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    CrashReporter.recordHandled(getApplication(), "teste com imagem", e)
+                    _uiState.value = _uiState.value.copy(
+                        isProcessing = false,
+                        statusMessage = "Erro inesperado ao traduzir a imagem: ${e::class.java.simpleName}"
+                    )
+                    return@launch
+                }
                 val width = bitmapToProcess.width.toFloat()
                 val height = bitmapToProcess.height.toFloat()
                 val overlays = result.translations.map {

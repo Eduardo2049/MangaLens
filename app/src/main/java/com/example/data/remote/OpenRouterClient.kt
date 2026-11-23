@@ -142,7 +142,15 @@ class OpenRouterClient(
             }
             val content = client.newCall(request).await().use { response ->
                 if (response.code == 429) {
+                    // OpenAI answers 429 both for "too fast" and for "no credits left"; only the first is worth waiting for.
+                    val error = runCatching { JSONObject(response.body?.string().orEmpty()).optJSONObject("error") }.getOrNull()
+                    if (error?.optString("code") == "insufficient_quota" || error?.optString("type") == "insufficient_quota") {
+                        throw IOException("$providerName: a conta está sem créditos. Adicione saldo no painel do provedor.")
+                    }
                     throw RateLimitedException(retryAfterMillis(response), "Limite de requisições da $providerName atingido")
+                }
+                if (response.code == 401 || response.code == 403) {
+                    throw IOException("$providerName: chave recusada (HTTP ${response.code}). Confira a chave em Configurações.")
                 }
                 if (onText != null && response.isSuccessful) return@use readStream(response, onText)
                 val text = response.body?.string().orEmpty()

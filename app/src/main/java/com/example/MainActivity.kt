@@ -88,6 +88,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        AppVisibility.isAppInFront = true
+    }
+
+    override fun onPause() {
+        AppVisibility.isAppInFront = false
+        super.onPause()
+    }
+
     /**
      * Verifica a permissão de overlay (SYSTEM_ALERT_WINDOW) antes de solicitar a captura de tela.
      * Em Android 10+ (API 29+) a permissão precisa ser concedida manualmente pelo usuário nas

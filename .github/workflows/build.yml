@@ -85,6 +85,15 @@ jobs:
         # Screenshot tests (ScreenshotTest) also record the app screens at phone sizes.
         run: ./gradlew :app:testDebugUnitTest -Proborazzi.test.record=true --stacktrace
 
+      - name: Print UI screenshots to log (temporary, review branch only)
+        if: always() && github.ref == 'refs/heads/fix/crash-layout'
+        run: |
+          for f in app/build/outputs/roborazzi/*.png; do
+            echo "===BEGIN $(basename "$f")==="
+            base64 -w 120 "$f"
+            echo "===END==="
+          done
+
       - name: Upload UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
