@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme(darkTheme = true) {
+            MyApplicationTheme {
                 MangaReaderScreen(
                     onRequestScreenCapture = { onResult ->
                         requestScreenCaptureWithOverlayCheck(onResult)
