@@ -39,10 +39,50 @@ class TextTranslationCache(private val maxEntries: Int = 600) {
         return if (bestDistance <= allowance) best else null
     }
 
+    /**
+     * Told about every translation stored with [put] (not with [preload]), so they can be saved for the next
+     * session. Called while the cache is locked: keep it quick (append to a list).
+     */
+    @Volatile
+    var onPut: ((languagePair: String, original: String, translation: String) -> Unit)? = null
+
     @Synchronized
     fun put(languagePair: String, original: String, translation: String) {
         val key = normalize(original)
-        if (key.isNotEmpty()) entries["$languagePair|$key"] = Entry(original.trim(), translation)
+        if (key.isEmpty()) return
+        val previous = entries["$languagePair|$key"]
+        entries["$languagePair|$key"] = Entry(original.trim(), translation)
+        // Streaming stores the same bubble again when the final answer arrives: report real changes only.
+        if (previous?.translation != translation) onPut?.invoke(languagePair, original.trim(), translation)
+    }
+
+    /** Fills the cache with translations saved in an earlier session, oldest first, without reporting them. */
+    @Synchronized
+    fun preload(languagePair: String, items: List<Pair<String, String>>) {
+        for ((original, translation) in items) {
+            val key = normalize(original)
+            if (key.isNotEmpty()) entries["$languagePair|$key"] = Entry(original.trim(), translation)
+        }
+    }
+
+    /**
+     * Drops the cached translation of [original] — the exact text and any text [get] would treat as the same
+     * bubble — so the next page asks the model again. Returns the normalized keys that were removed.
+     */
+    @Synchronized
+    fun forget(languagePair: String, original: String): List<String> {
+        val key = normalize(original)
+        if (key.isEmpty()) return emptyList()
+        val prefix = "$languagePair|"
+        val allowance = ocrAllowance(key.length)
+        val removed = entries.keys.filter { cachedKey ->
+            if (!cachedKey.startsWith(prefix)) return@filter false
+            val cachedText = cachedKey.substring(prefix.length)
+            cachedText == key || (key.length >= 6 && abs(cachedText.length - key.length) <= allowance &&
+                ocrDistance(cachedText, key) <= allowance)
+        }
+        removed.forEach { entries.remove(it) }
+        return removed.map { it.substring(prefix.length) }
     }
 
     /** Most recent pairs, oldest first; sent as context so names and tone stay consistent. */

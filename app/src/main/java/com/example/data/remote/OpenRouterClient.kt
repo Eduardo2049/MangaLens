@@ -243,6 +243,12 @@ class OpenRouterClient(
 
         private fun parseModels(csv: String) = csv.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
+        /**
+         * Free models typed in Settings (comma separated, in order of preference) or, when blank, the list
+         * this build came with. Free models come and go on OpenRouter; this avoids a new APK for each change.
+         */
+        fun textModelsFor(custom: String): List<String> = parseModels(custom).ifEmpty { textModels }
+
         private fun backendEndpoint(): String {
             val backend = BuildConfig.TRANSLATION_API_BASE_URL.trim().trimEnd('/')
             return if (backend.isBlank()) "" else "$backend/v1/chat/completions"

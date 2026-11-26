@@ -24,19 +24,25 @@ class RequestBudget(
     private val clock: () -> Long = System::currentTimeMillis
 ) : RequestGate {
     private val prefs: SharedPreferences = context.getSharedPreferences("manga_lens_budget", Context.MODE_PRIVATE)
-    private var lastRequestAt = 0L
 
-    /** Each provider counts its own requests per day, so using OpenAI never eats the OpenRouter free quota. */
+    /**
+     * Each provider counts its own requests per day, so using OpenAI never eats the OpenRouter free quota.
+     * Spacing and the cool-down after a 429 are per provider too: switching away from a rate-limited
+     * OpenRouter must not make OpenAI or Gemini wait for it.
+     */
     @Volatile
     var provider: TranslationProvider = TranslationProvider.OPENROUTER
+
+    private val lastRequestAt = mutableMapOf<TranslationProvider, Long>()
+    private val blockedUntilBy = mutableMapOf<TranslationProvider, Long>()
 
     // OpenRouter keeps the original key names, so counts saved by earlier versions still apply.
     private val keyDay: String get() = if (provider == TranslationProvider.OPENROUTER) KEY_DAY else "${KEY_DAY}_${provider.id}"
     private val keyCount: String get() = if (provider == TranslationProvider.OPENROUTER) KEY_COUNT else "${KEY_COUNT}_${provider.id}"
 
-    @Volatile
-    var blockedUntil: Long = 0L
-        private set
+    /** Until when the current provider asked us to wait (429), as an epoch-millis timestamp. */
+    val blockedUntil: Long
+        @Synchronized get() = blockedUntilBy[provider] ?: 0L
 
     val usedToday: Int
         @Synchronized get() = if (prefs.getString(keyDay, null) == today()) prefs.getInt(keyCount, 0) else 0
@@ -48,12 +54,13 @@ class RequestBudget(
     override fun waitTimeMillis(): Long? {
         if (dailyLimit in 1..usedToday) return null
         val now = clock()
-        return maxOf(0L, blockedUntil - now, lastRequestAt + minIntervalMillis - now)
+        val last = lastRequestAt[provider] ?: 0L
+        return maxOf(0L, blockedUntil - now, last + minIntervalMillis - now)
     }
 
     @Synchronized
     override fun recordRequest() {
-        lastRequestAt = clock()
+        lastRequestAt[provider] = clock()
         val day = today()
         val count = if (prefs.getString(keyDay, null) == day) prefs.getInt(keyCount, 0) else 0
         prefs.edit().putString(keyDay, day).putInt(keyCount, count + 1).apply()
@@ -61,7 +68,7 @@ class RequestBudget(
 
     @Synchronized
     override fun blockUntil(timestampMillis: Long) {
-        blockedUntil = maxOf(blockedUntil, timestampMillis)
+        blockedUntilBy[provider] = maxOf(blockedUntil, timestampMillis)
     }
 
     private fun today(): String = dayOf(clock())

@@ -80,7 +80,8 @@ class MangaOverlayService : Service() {
     private var overlayLayer: TranslationOverlayLayer? = null
 
     private val captureManager by lazy { ScreenCaptureManager(this) }
-    private val pipeline by lazy { TranslationPipeline(this) }
+    /** Shared with the app screen (same cache, quota and request spacing); acquired in onCreate. */
+    private lateinit var pipeline: TranslationPipeline
     private val prefsRepo by lazy { UserPreferencesRepository(this) }
     private val historyDao by lazy { AppDatabase.get(this).translationHistoryDao() }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -110,6 +111,7 @@ class MangaOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        pipeline = TranslationPipeline.acquire(this)
         statusBarPx = resources.getIdentifier("status_bar_height", "dimen", "android")
             .takeIf { it > 0 }?.let { resources.getDimensionPixelSize(it) } ?: (24 * resources.displayMetrics.density).toInt()
     }
@@ -464,7 +466,8 @@ class MangaOverlayService : Service() {
             return
         }
         translateJob?.cancel()
-        translatePage(thumb)
+        // Long-press asks the model again; a tap in manual mode may reuse the cache.
+        translatePage(thumb, fresh = force)
     }
 
     /** Draws [translations] when the screen still shows the page [thumb] was taken from. */
@@ -486,7 +489,7 @@ class MangaOverlayService : Service() {
         return samePage
     }
 
-    private fun translatePage(thumb: FrameThumbnail) {
+    private fun translatePage(thumb: FrameThumbnail, fresh: Boolean = false) {
         processedThumb = thumb
         val generation = ++translateGeneration
         fun isCurrent() = generation == translateGeneration && translateJob?.isActive == true
@@ -505,7 +508,7 @@ class MangaOverlayService : Service() {
             }
             val result = try {
                 setStatus(Status.TRANSLATING)
-                pipeline.translate(bitmap, prefs, exclusions) { ready ->
+                pipeline.translate(bitmap, prefs, exclusions, fresh) { ready ->
                     // Streamed results arrive on an IO thread; windows must be touched on the main thread.
                     serviceScope.launch { if (isCurrent()) showIfSamePage(thumb, ready, prefs) }
                 }
@@ -584,7 +587,7 @@ class MangaOverlayService : Service() {
         bubbleRoot?.let { try { windowManager?.removeView(it) } catch (_: Exception) {} }
         bubbleRoot = null
         captureManager.stop()
-        pipeline.close()
+        TranslationPipeline.release()
         super.onDestroy()
     }
 
