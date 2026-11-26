@@ -12,6 +12,7 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -79,6 +80,8 @@ class OcrEngine {
     private suspend fun recognizeWith(recognizer: TextRecognizer, image: InputImage): List<OcrBlock> {
         val result = try {
             recognizer.process(image).await()
+        } catch (e: CancellationException) {
+            throw e // A cancelled page must stop here, not continue with "no text found".
         } catch (e: Exception) {
             Log.e("MangaLens", "OCR falhou: ${e.message}")
             return emptyList()

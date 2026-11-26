@@ -197,6 +197,10 @@ class ScreenCaptureManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Capture: erro ao converter frame: ${e.message}")
             null
+        } catch (e: OutOfMemoryError) {
+            // A full-screen copy is ~10 MB; when memory is short, skip this page instead of closing the app.
+            Log.e(TAG, "Capture: sem memória para copiar a tela")
+            null
         }
     }
 

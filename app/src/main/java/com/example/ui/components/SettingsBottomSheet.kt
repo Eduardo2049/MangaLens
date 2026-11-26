@@ -1,8 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,47 +7,38 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FormatSize
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Opacity
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.UserPreferences
@@ -59,6 +47,7 @@ import com.example.data.model.TranslationEngine
 import com.example.data.model.TranslationMode
 import com.example.data.model.TranslationProvider
 import com.example.data.remote.OpenRouterClient
+import com.example.ui.theme.LensColors
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,8 +56,6 @@ fun SettingsBottomSheet(
     userPreferences: UserPreferences,
     sheetState: SheetState,
     onDismiss: () -> Unit,
-    onUpdateSourceLang: (SupportedLanguage) -> Unit,
-    onUpdateTargetLang: (SupportedLanguage) -> Unit,
     onUpdateOpacity: (Float) -> Unit,
     onUpdateFontSize: (Int) -> Unit,
     onUpdateBubbleStyle: (String) -> Unit,
@@ -82,229 +69,287 @@ fun SettingsBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF0F172A),
-        contentColor = Color.White
+        containerColor = LensColors.Background,
+        contentColor = LensColors.Text
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .testTag("settings_bottom_sheet")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = Color(0xFF38BDF8),
-                    modifier = Modifier.size(24.dp)
+        SettingsContent(
+            userPreferences = userPreferences,
+            onUpdateOpacity = onUpdateOpacity,
+            onUpdateFontSize = onUpdateFontSize,
+            onUpdateBubbleStyle = onUpdateBubbleStyle,
+            onUpdateDailyLimit = onUpdateDailyLimit,
+            onUpdateTranslationMode = onUpdateTranslationMode,
+            onUpdateTranslationEngine = onUpdateTranslationEngine,
+            onUpdateProvider = onUpdateProvider,
+            onSaveApiKey = onSaveApiKey,
+            onSaveModel = onSaveModel
+        )
+    }
+}
+
+/** Everything in the settings sheet; scrolls on its own so it also fits small phones with the keyboard open. */
+@Composable
+fun SettingsContent(
+    userPreferences: UserPreferences,
+    modifier: Modifier = Modifier,
+    onUpdateOpacity: (Float) -> Unit = {},
+    onUpdateFontSize: (Int) -> Unit = {},
+    onUpdateBubbleStyle: (String) -> Unit = {},
+    onUpdateDailyLimit: (Int) -> Unit = {},
+    onUpdateTranslationMode: (TranslationMode) -> Unit = {},
+    onUpdateTranslationEngine: (TranslationEngine) -> Unit = {},
+    onUpdateProvider: (TranslationProvider) -> Unit = {},
+    onSaveApiKey: (TranslationProvider, String) -> Unit = { _, _ -> },
+    onSaveModel: (TranslationProvider, String) -> Unit = { _, _ -> }
+) {
+    val selected = userPreferences.provider
+    Column(
+        verticalArrangement = Arrangement.spacedBy(28.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp)
+            .testTag("settings_bottom_sheet")
+    ) {
+        Text(text = "Configurações", color = LensColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+
+        Column {
+            GroupLabel("Provedor de tradução", supporting = "Cada provedor guarda a própria chave neste aparelho. Dá para trocar quando quiser.")
+            ChoiceGroup {
+                TranslationProvider.entries.forEach { option ->
+                    val hasKey = userPreferences.keyFor(option).isNotBlank() ||
+                        (option == TranslationProvider.OPENROUTER && (OpenRouterClient.usesDirectKey() || OpenRouterClient.hasBackend()))
+                    ChoiceRow(
+                        title = option.title,
+                        description = option.description,
+                        status = if (hasKey) "Chave salva" else "Sem chave",
+                        statusColor = if (hasKey) LensColors.Success else LensColors.TextMuted,
+                        selected = selected == option,
+                        onClick = { onUpdateProvider(option) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            ApiKeyField(
+                provider = selected,
+                savedKey = userPreferences.keyFor(selected),
+                onSave = { onSaveApiKey(selected, it) }
+            )
+            // OpenRouter: optional list of free models, so a model taken offline does not need a new APK.
+            Spacer(Modifier.height(12.dp))
+            ModelField(
+                provider = selected,
+                savedModel = userPreferences.customModels[selected].orEmpty(),
+                onSave = { onSaveModel(selected, it) }
+            )
+        }
+
+        Column {
+            GroupLabel("Quando traduzir")
+            ChoiceGroup {
+                ChoiceRow(
+                    title = "Sozinho",
+                    description = "Traduz cada página nova quando você para de rolar.",
+                    selected = userPreferences.translationMode == TranslationMode.DYNAMIC,
+                    onClick = { onUpdateTranslationMode(TranslationMode.DYNAMIC) }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                ChoiceRow(
+                    title = "Quando eu tocar na bolha",
+                    description = "Nada é enviado até você pedir. Toque de novo para esconder.",
+                    selected = userPreferences.translationMode == TranslationMode.MANUAL,
+                    onClick = { onUpdateTranslationMode(TranslationMode.MANUAL) }
+                )
+            }
+        }
+
+        Column {
+            GroupLabel("Leitura do texto")
+            ChoiceGroup {
+                ChoiceRow(
+                    title = "Rápida",
+                    description = "O texto é lido no celular e só ele vai para a IA. Gasta menos.",
+                    selected = userPreferences.translationEngine == TranslationEngine.OCR_TEXT,
+                    onClick = { onUpdateTranslationEngine(TranslationEngine.OCR_TEXT) }
+                )
+                ChoiceRow(
+                    title = "Precisa",
+                    description = "A IA também vê a página: corrige erros de leitura e texto vertical. Mais lenta.",
+                    selected = userPreferences.translationEngine == TranslationEngine.VISION,
+                    onClick = { onUpdateTranslationEngine(TranslationEngine.VISION) }
+                )
+            }
+        }
+
+        if (selected.hasFreeTierLimit) {
+            Column {
+                GroupLabel("Limite diário da OpenRouter", supporting = "O app para de pedir traduções novas ao chegar no limite do seu plano.")
+                ChoiceGroup {
+                    ChoiceRow(
+                        title = "${UserPreferences.FREE_DAILY_LIMIT} por dia",
+                        description = "Plano grátis",
+                        selected = userPreferences.dailyRequestLimit == UserPreferences.FREE_DAILY_LIMIT,
+                        onClick = { onUpdateDailyLimit(UserPreferences.FREE_DAILY_LIMIT) }
+                    )
+                    ChoiceRow(
+                        title = "${UserPreferences.CREDITS_DAILY_LIMIT} por dia",
+                        description = "Depois de comprar US$ 10 em créditos uma vez",
+                        selected = userPreferences.dailyRequestLimit == UserPreferences.CREDITS_DAILY_LIMIT,
+                        onClick = { onUpdateDailyLimit(UserPreferences.CREDITS_DAILY_LIMIT) }
+                    )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            GroupLabel("Aparência das traduções")
+
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Opacidade", color = LensColors.Text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text("${(userPreferences.overlayOpacity * 100).roundToInt()}%", color = LensColors.TextMuted, fontSize = 14.sp)
+                }
+                Slider(
+                    value = userPreferences.overlayOpacity,
+                    onValueChange = onUpdateOpacity,
+                    valueRange = UserPreferences.MIN_OVERLAY_OPACITY..UserPreferences.MAX_OVERLAY_OPACITY,
+                    colors = SliderDefaults.colors(
+                        thumbColor = LensColors.Cyan,
+                        activeTrackColor = LensColors.Cyan,
+                        inactiveTrackColor = LensColors.SurfaceHigh
+                    )
+                )
                 Text(
-                    text = "Configurações de Tradução & Leitor",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    text = "O Android limita a 80% as janelas que deixam o toque passar para o leitor.",
+                    color = LensColors.TextMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
             }
 
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(bottom = 24.dp)
-            ) {
-                item {
-                    SettingsSectionTitle("Quando traduzir")
-                    TranslationMode.entries.forEach { mode ->
-                        SettingsChoiceRow(
-                            title = mode.title,
-                            description = mode.description,
-                            selected = userPreferences.translationMode == mode,
-                            onClick = { onUpdateTranslationMode(mode) }
-                        )
-                    }
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Tamanho do texto", color = LensColors.Text, fontSize = 15.sp)
+                SegmentedChoice(
+                    options = listOf(11 to "Pequeno", 13 to "Médio", 16 to "Grande"),
+                    selected = userPreferences.overlayFontSizeSp,
+                    onSelect = onUpdateFontSize
+                )
+            }
 
-                item {
-                    SettingsSectionTitle("Motor de tradução")
-                    TranslationEngine.entries.forEach { engine ->
-                        SettingsChoiceRow(
-                            title = engine.title,
-                            description = engine.description,
-                            selected = userPreferences.translationEngine == engine,
-                            onClick = { onUpdateTranslationEngine(engine) }
-                        )
-                    }
-                    val provider = userPreferences.provider
-                    val hasKey = userPreferences.keyFor(provider).isNotBlank()
-                    val noKeyAnywhere = !hasKey && (
-                        provider != TranslationProvider.OPENROUTER ||
-                            (!OpenRouterClient.usesDirectKey() && !OpenRouterClient.hasBackend())
-                        )
-                    Text(
-                        text = when {
-                            provider != TranslationProvider.OPENROUTER && hasKey ->
-                                "${provider.title} • ${userPreferences.modelFor(provider)}"
-                            provider != TranslationProvider.OPENROUTER ->
-                                "Nenhuma chave configurada: cole sua chave da ${provider.title} abaixo para traduzir"
-                            hasKey ->
-                                "OpenRouter (chave do app) • ${openRouterFirstModel(userPreferences)}"
-                            OpenRouterClient.usesDirectKey() ->
-                                "OpenRouter (chave do build) • ${openRouterFirstModel(userPreferences)}"
-                            OpenRouterClient.hasBackend() -> "OpenRouter via backend MangaLens"
-                            else -> "Nenhuma chave configurada: cole sua chave da OpenRouter abaixo para traduzir"
-                        },
-                        color = if (noKeyAnywhere) Color(0xFFF87171) else Color(0xFF64748B),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 4.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Fundo dos balões", color = LensColors.Text, fontSize = 15.sp)
+                SegmentedChoice(
+                    options = listOf("SPEECH_BUBBLE" to "Branco", "SOLID_HIGHLIGHT" to "Escuro", "SEMI_TRANSPARENT" to "Translúcido"),
+                    selected = userPreferences.bubbleStyle,
+                    onSelect = onUpdateBubbleStyle
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ApiKeyField(
+    provider: TranslationProvider,
+    savedKey: String,
+    onSave: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Keyed by provider too: switching provider must not leave the previous provider's draft on screen.
+    var draft by remember(provider, savedKey) { mutableStateOf(savedKey) }
+    var visible by remember(provider) { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val canSave = draft.isNotBlank() && draft != savedKey
+    Column(modifier = modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it.trim() },
+            singleLine = true,
+            label = { Text("Chave da ${provider.title}") },
+            placeholder = { Text(provider.keyPlaceholder) },
+            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { visible = !visible }) {
+                    Icon(
+                        if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (visible) "Esconder chave" else "Mostrar chave"
                     )
                 }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = {
+                if (canSave) onSave(draft)
+                focusManager.clearFocus()
+            }),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("api_key_field")
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            Text(
+                text = if (savedKey.isBlank()) "${provider.keyHelp}. Fica só neste aparelho." else "Chave salva neste aparelho.",
+                color = LensColors.TextMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (savedKey.isNotBlank()) {
+                TextButton(onClick = { onSave("") }) { Text("Remover", color = LensColors.Error) }
+            }
+            TextButton(onClick = { onSave(draft); focusManager.clearFocus() }, enabled = canSave) {
+                Text("Salvar", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
 
-                item {
-                    SettingsSectionTitle("Provedor de tradução")
-                    TranslationProvider.entries.forEach { option ->
-                        val saved = userPreferences.keyFor(option).isNotBlank()
-                        SettingsChoiceRow(
-                            title = option.title,
-                            description = option.description + if (saved) " • chave salva" else " • sem chave",
-                            selected = userPreferences.provider == option,
-                            onClick = { onUpdateProvider(option) }
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val selected = userPreferences.provider
-                    ApiKeyField(
-                        provider = selected,
-                        savedKey = userPreferences.keyFor(selected),
-                        onSave = { onSaveApiKey(selected, it) }
-                    )
-                    // OpenRouter: optional list of free models, so a model taken offline does not need a new APK.
-                    ModelField(
-                        provider = selected,
-                        savedModel = userPreferences.customModels[selected].orEmpty(),
-                        onSave = { onSaveModel(selected, it) }
-                    )
-                }
-
-                if (userPreferences.provider.hasFreeTierLimit) item {
-                    SettingsSectionTitle("Limite diário de requisições")
-                    listOf(
-                        UserPreferences.FREE_DAILY_LIMIT to "Plano grátis da OpenRouter",
-                        UserPreferences.CREDITS_DAILY_LIMIT to "Comprei créditos na OpenRouter (US$ 10 uma vez)"
-                    ).forEach { (limit, description) ->
-                        SettingsChoiceRow(
-                            title = "$limit por dia",
-                            description = description,
-                            selected = userPreferences.dailyRequestLimit == limit,
-                            onClick = { onUpdateDailyLimit(limit) }
-                        )
-                    }
-                }
-
-                // Opacity Slider
-                item {
-                    SettingsSectionTitle("Opacidade do Balão Traduzido")
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Opacity,
-                            contentDescription = null,
-                            tint = Color(0xFF94A3B8),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        // Android ignores anything above 80% on overlays that let touches through to the reader.
-                        Slider(
-                            value = userPreferences.overlayOpacity,
-                            onValueChange = onUpdateOpacity,
-                            valueRange = UserPreferences.MIN_OVERLAY_OPACITY..UserPreferences.MAX_OVERLAY_OPACITY,
-                            colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFF38BDF8),
-                                activeTrackColor = Color(0xFF0284C7),
-                                inactiveTrackColor = Color(0xFF334155)
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "${(userPreferences.overlayOpacity * 100).roundToInt()}%",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Text(
-                        text = "Máximo de 80%: limite do Android para sobreposições que deixam o toque passar.",
-                        color = Color(0xFF64748B),
-                        fontSize = 11.sp
-                    )
-                }
-
-                // Section 3: Font Size Selector
-                item {
-                    SettingsSectionTitle("Tamanho do Texto")
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            11 to "Pequeno (11sp)",
-                            13 to "Médio (13sp)",
-                            16 to "Grande (16sp)"
-                        ).forEach { (sizeSp, label) ->
-                            val isSelected = userPreferences.overlayFontSizeSp == sizeSp
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) Color(0xFF0EA5E9) else Color(0xFF1E293B),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onUpdateFontSize(sizeSp) }
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(vertical = 10.dp),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Section 4: Bubble Visual Style
-                item {
-                    SettingsSectionTitle("Estilo Visual da Sobreposição")
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            "SPEECH_BUBBLE" to "Balão Branco",
-                            "SOLID_HIGHLIGHT" to "Destaque Escuro",
-                            "SEMI_TRANSPARENT" to "Translúcido"
-                        ).forEach { (styleKey, label) ->
-                            val isSelected = userPreferences.bubbleStyle == styleKey
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) Color(0xFF6366F1) else Color(0xFF1E293B),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onUpdateBubbleStyle(styleKey) }
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(vertical = 10.dp),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                }
+/** Model for OpenAI/Gemini, or the list of free models for OpenRouter; empty = the default. */
+@Composable
+private fun ModelField(
+    provider: TranslationProvider,
+    savedModel: String,
+    onSave: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var draft by remember(provider, savedModel) { mutableStateOf(savedModel) }
+    val focusManager = LocalFocusManager.current
+    // OpenRouter takes a list of free models (tried in order); the other providers take a single model.
+    val isList = !provider.usesChosenModel
+    val defaultText = if (isList) OpenRouterClient.textModels.joinToString(", ") else provider.defaultModel
+    Column(modifier = modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it.trim() },
+            singleLine = !isList,
+            label = { Text(if (isList) "Modelos gratuitos (até 3, separados por vírgula)" else "Modelo") },
+            placeholder = { Text(defaultText) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = {
+                if (draft != savedModel) onSave(draft)
+                focusManager.clearFocus()
+            }),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("model_field")
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            Text(
+                text = when {
+                    savedModel.isBlank() && isList -> "Vazio usa a lista do app. Veja os modelos grátis em openrouter.ai/models."
+                    savedModel.isBlank() -> "Vazio usa o padrão: ${provider.defaultModel}"
+                    isList -> "Usando a sua lista de modelos."
+                    else -> "Usando o modelo escolhido."
+                },
+                color = LensColors.TextMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (savedModel.isNotBlank()) {
+                TextButton(onClick = { onSave("") }) { Text("Usar padrão", color = LensColors.TextMuted) }
+            }
+            TextButton(onClick = { onSave(draft); focusManager.clearFocus() }, enabled = draft != savedModel) {
+                Text("Salvar", fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -319,266 +364,69 @@ fun LanguagePickerDialog(
     onSelectSource: (SupportedLanguage) -> Unit,
     onSelectTarget: (SupportedLanguage) -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(0) } // 0 = Source, 1 = Target
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF0F172A),
-        contentColor = Color.White
+        containerColor = LensColors.Background,
+        contentColor = LensColors.Text
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .testTag("language_picker_dialog")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Language,
-                    contentDescription = null,
-                    tint = Color(0xFF38BDF8),
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Seleção de Idiomas",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-
-            // Tab Selector
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1E293B), RoundedCornerShape(12.dp))
-                    .padding(4.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (selectedTab == 0) Color(0xFF0284C7) else Color.Transparent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { selectedTab = 0 }
-                ) {
-                    Text(
-                        text = "Origem: ${userPreferences.sourceLanguage.displayName}",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (selectedTab == 1) Color(0xFF0284C7) else Color.Transparent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { selectedTab = 1 }
-                ) {
-                    Text(
-                        text = "Destino: ${userPreferences.targetLanguage.displayName}",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            val langList = if (selectedTab == 0) SupportedLanguage.getSourceLanguages() else SupportedLanguage.getTargetLanguages()
-            val currentSelected = if (selectedTab == 0) userPreferences.sourceLanguage else userPreferences.targetLanguage
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp)
-                    .padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(langList) { lang ->
-                    val isSelected = lang == currentSelected
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) Color(0xFF312E81) else Color(0xFF1E293B),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (selectedTab == 0) onSelectSource(lang) else onSelectTarget(lang)
-                                onDismiss()
-                            }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-                        ) {
-                            Text(
-                                text = lang.flagEmoji,
-                                fontSize = 18.sp
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = lang.displayName,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Color(0xFF818CF8),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        LanguagePickerContent(
+            userPreferences = userPreferences,
+            onSelectSource = onSelectSource,
+            onSelectTarget = { onSelectTarget(it); onDismiss() }
+        )
     }
 }
 
+private fun SupportedLanguage.pickerName(): String =
+    if (this == SupportedLanguage.AUTO) "Detectar automaticamente" else displayName
+
+/** Source first, then target: picking the source moves on to the target instead of closing the sheet. */
 @Composable
-private fun SettingsChoiceRow(
-    title: String,
-    description: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+fun LanguagePickerContent(
+    userPreferences: UserPreferences,
+    onSelectSource: (SupportedLanguage) -> Unit,
+    onSelectTarget: (SupportedLanguage) -> Unit,
+    modifier: Modifier = Modifier,
+    initialTab: Int = 0
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    var tab by remember { mutableIntStateOf(initialTab) }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp)
+            .testTag("language_picker_dialog")
     ) {
-        RadioButton(
-            selected = selected,
-            onClick = onClick,
-            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF38BDF8))
+        Text(text = "Idiomas", color = LensColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        SegmentedChoice(
+            options = listOf(
+                0 to "De: ${if (userPreferences.sourceLanguage == SupportedLanguage.AUTO) "Detectar" else userPreferences.sourceLanguage.displayName.substringBefore(" (")}",
+                1 to "Para: ${userPreferences.targetLanguage.displayName.substringBefore(" (")}"
+            ),
+            selected = tab,
+            onSelect = { tab = it }
         )
-        Column {
-            Text(text = title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = description, color = Color(0xFF94A3B8), fontSize = 11.sp)
-        }
-    }
-}
-
-/** Key typed once on the phone, so a CI-built APK works without embedding any secret. */
-@Composable
-private fun ApiKeyField(
-    provider: TranslationProvider,
-    savedKey: String,
-    onSave: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Keyed by provider as well: switching provider must not leave the previous provider's draft on screen.
-    var draft by remember(provider, savedKey) { mutableStateOf(savedKey) }
-    Column(modifier = modifier.fillMaxWidth()) {
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it.trim() },
-            singleLine = true,
-            placeholder = { Text(provider.keyPlaceholder, color = Color(0xFF64748B)) },
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("api_key_field")
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = if (savedKey.isBlank()) "${provider.keyHelp} • fica só neste aparelho" else "Chave da ${provider.title} salva neste aparelho",
-                color = Color(0xFF64748B),
-                fontSize = 11.sp,
-                modifier = Modifier.weight(1f)
-            )
-            if (savedKey.isNotBlank()) {
-                TextButton(onClick = { onSave("") }) { Text("Remover", color = Color(0xFFF87171)) }
-            }
-            TextButton(onClick = { onSave(draft) }, enabled = draft != savedKey) {
-                Text("Salvar", color = Color(0xFF38BDF8))
-            }
-        }
-    }
-}
-
-/** Model name for providers that use a single model; empty = the provider's default. */
-@Composable
-private fun ModelField(
-    provider: TranslationProvider,
-    savedModel: String,
-    onSave: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var draft by remember(provider, savedModel) { mutableStateOf(savedModel) }
-    // OpenRouter takes a list of free models (tried in order); the other providers take a single model.
-    val isList = !provider.usesChosenModel
-    val defaultText = if (isList) OpenRouterClient.textModels.joinToString(", ") else provider.defaultModel
-    Column(modifier = modifier.fillMaxWidth().padding(top = 8.dp)) {
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it.trim() },
-            singleLine = !isList,
-            label = {
-                Text(
-                    if (isList) "Modelos gratuitos (separados por vírgula, até 3)" else "Modelo",
-                    color = Color(0xFF64748B)
+        val options = if (tab == 0) SupportedLanguage.getSourceLanguages() else SupportedLanguage.getTargetLanguages()
+        val current = if (tab == 0) userPreferences.sourceLanguage else userPreferences.targetLanguage
+        ChoiceGroup {
+            options.forEach { language ->
+                ChoiceRow(
+                    title = language.pickerName(),
+                    description = if (language == SupportedLanguage.AUTO) "Japonês, coreano, chinês ou inglês" else null,
+                    selected = language == current,
+                    onClick = {
+                        if (tab == 0) {
+                            onSelectSource(language)
+                            tab = 1
+                        } else {
+                            onSelectTarget(language)
+                        }
+                    }
                 )
-            },
-            placeholder = { Text(defaultText, color = Color(0xFF64748B)) },
-            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("model_field")
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = when {
-                    savedModel.isBlank() && isList -> "Usando a lista do app (veja os grátis em openrouter.ai/models)"
-                    savedModel.isBlank() -> "Usando o padrão: ${provider.defaultModel}"
-                    isList -> "Usando a sua lista"
-                    else -> "Usando o modelo escolhido"
-                },
-                color = Color(0xFF64748B),
-                fontSize = 11.sp,
-                modifier = Modifier.weight(1f)
-            )
-            if (savedModel.isNotBlank()) {
-                TextButton(onClick = { onSave("") }) { Text("Padrão", color = Color(0xFFF87171)) }
-            }
-            TextButton(onClick = { onSave(draft) }, enabled = draft != savedModel) {
-                Text("Salvar", color = Color(0xFF38BDF8))
             }
         }
     }
-}
-
-/** First OpenRouter model that will be tried: the user's list, or the one the app came with. */
-private fun openRouterFirstModel(prefs: UserPreferences): String =
-    OpenRouterClient.textModelsFor(prefs.customModels[TranslationProvider.OPENROUTER].orEmpty()).firstOrNull().orEmpty()
-
-@Composable
-private fun SettingsSectionTitle(title: String) {
-    Text(
-        text = title,
-        color = Color(0xFF38BDF8),
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(bottom = 6.dp)
-    )
 }

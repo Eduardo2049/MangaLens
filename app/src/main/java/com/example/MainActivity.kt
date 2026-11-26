@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme(darkTheme = true) {
+            MyApplicationTheme {
                 MangaReaderScreen(
                     onRequestScreenCapture = { onResult ->
                         requestScreenCaptureWithOverlayCheck(onResult)
@@ -86,6 +86,16 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppVisibility.isAppInFront = true
+    }
+
+    override fun onPause() {
+        AppVisibility.isAppInFront = false
+        super.onPause()
     }
 
     /**
