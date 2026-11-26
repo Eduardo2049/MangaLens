@@ -123,6 +123,12 @@ $env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 - **Banco Room:** toda mudança de tabela sobe a `version` e ganha uma `Migration` em `AppDatabase.builder` (nunca `fallbackToDestructiveMigration`: apagaria histórico e cache). O esquema de cada versão é exportado em `app/schemas/` (`room.schemaLocation`) — commite esses JSON. `TranslationStoreTest` cobre a migração 1→2.
 - Firebase/Google Services foram removidos (não eram usados); não reintroduza sem `google-services.json` válido.
 
+## 🌐 Página (GitHub Pages, `docs/`)
+
+- `docs/index.html` usa os componentes do [sakuga-vfx](https://github.com/finktheartist/sakuga-vfx) copiados em `docs/vendor/sakuga/` (MIT). **Não edite esses `.js`**: as cores ficam no bloco "sakuga-vfx: tema" do `<style>` e no objeto `SAKUGA_FX` do script.
+- Os botões de ação continuam como `<a class="btn" data-sakuga>` no HTML (funcionam sem JavaScript e para buscadores); o script troca por `<sakuga-button>` só quando os componentes carregaram.
+- `docs/lab/sakuga.html` é o laboratório de cores (não indexado): gera o CSS e o JS para colar no `index.html`.
+
 ## 🧪 Diretrizes de Teste
 
 - Sempre que criar uma nova funcionalidade de UI, considere adicionar um teste de screenshot com **Roborazzi**.

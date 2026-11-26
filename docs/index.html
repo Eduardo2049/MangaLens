@@ -69,7 +69,7 @@
   .topnav a:hover { text-decoration: underline; text-decoration-color: var(--cyan); }
 
   /* Buttons */
-  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
   .btn {
     display: inline-flex; align-items: center; gap: 10px;
     min-height: 48px; padding: 12px 22px;
@@ -81,6 +81,41 @@
   .btn-primary:hover { background: #2C2760; }
   .btn-secondary { background: transparent; color: var(--ink); }
   .btn-secondary:hover { background: var(--tone); }
+
+  /* ── sakuga-vfx: tema ────────────────────────────────────────────────────
+     Botões, toast e dicas animados (vendor/sakuga, MIT). Para trocar as cores, ajuste em
+     lab/sakuga.html, copie o CSS gerado e cole por cima deste bloco; o JS gerado vai em SAKUGA_FX,
+     no script do fim da página. */
+  :root {
+    --sk-card: #FFFFFF;
+    --sk-ink: #1B1740;
+    --sk-soft: #22D3EE;
+    --sk-pri: #22D3EE;
+    --sk-acc: #0E7490;
+    --sk-fill: #22D3EE;
+    --sk-dim: #4A4670;
+    --sk-track: #E2E0F2;
+    --sk-r: 12px;
+    --sk-bw: 2.5px;
+  }
+  /* Fora do que o laboratório gera: cor do ✓ do toast e sombra do botão secundário. */
+  :root { --sk-on-pri: #1B1740; --sk-alt-sh: 5px 6px 0 #E2E0F2; }
+  /* Os componentes usam a fonte do site, não a deles. */
+  sakuga-button::part(button) {
+    display: inline-flex; align-items: center;
+    min-height: 48px; padding: 12px 22px;
+    font: 700 1rem/1.2 var(--text);
+  }
+  sakuga-button svg { width: 20px; height: 20px; flex: none; margin-right: 10px; }
+  /* Botão principal escuro, como o .btn-primary; na seção escura ele volta a ser claro. */
+  sakuga-button.sk-primary { --sk-card: var(--ink); --sk-ink: var(--white); }
+  .start sakuga-button.sk-primary { --sk-card: var(--white); --sk-ink: var(--ink); }
+  .start sakuga-button.sk-secondary { --sk-card: #2C2760; --sk-ink: var(--white); --sk-alt-line: #8A86B8; --sk-alt-sh: none; }
+  sakuga-tooltip { margin: 0 0 0 8px; vertical-align: -5px; }
+  sakuga-tooltip::part(button) { width: 28px; height: 28px; font: 700 15px/1 var(--text); box-shadow: 2px 3px 0 var(--sk-soft); }
+  sakuga-tooltip::part(tip) { font: 700 15px/1.45 var(--text); color: var(--ink); }
+  sakuga-toast { position: fixed; left: 20px; bottom: 20px; z-index: 10; pointer-events: none; }
+  sakuga-toast::part(toast) { pointer-events: auto; font-family: var(--text); }
 
   /* Hero */
   .hero { padding-block: clamp(32px, 6vw, 72px) clamp(64px, 9vw, 112px); overflow-x: clip; }
@@ -276,11 +311,11 @@
         <h1>Leia mangá traduzido sem sair do seu leitor</h1>
         <p class="lede">O MangaLens é uma lupa flutuante para Android. Ele lê os balões da tela com OCR no próprio celular e desenha a tradução por cima deles, no Mihon, Tachiyomi, Komikku, Kotatsu ou onde você estiver lendo.</p>
         <div class="actions">
-          <a class="btn btn-primary" href="https://github.com/Eduardo2049/MangaLens/releases/latest">
+          <a class="btn btn-primary" data-sakuga="download" href="https://github.com/Eduardo2049/MangaLens/releases/latest">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>
             Baixar o APK
           </a>
-          <a class="btn btn-secondary" href="https://github.com/Eduardo2049/MangaLens">Ver o código no GitHub</a>
+          <a class="btn btn-secondary" data-sakuga="link" href="https://github.com/Eduardo2049/MangaLens">Ver o código no GitHub</a>
         </div>
         <p class="fine">Grátis e de código aberto. Funciona no Android 7.0 ou superior e traduz mangá, manhwa e webtoon em japonês, coreano, chinês ou inglês.</p>
       </div>
@@ -453,7 +488,7 @@
       <h2 id="recursos-titulo">O que vem no app</h2>
       <dl class="features">
         <div>
-          <dt>OCR no aparelho</dt>
+          <dt>OCR no aparelho<sakuga-tooltip label="O que é OCR?" text="Reconhecimento de texto: o próprio celular lê as letras da imagem, sem mandar a página para a internet."></sakuga-tooltip></dt>
           <dd>ML Kit para texto latino, japonês, coreano e chinês, com a posição exata de cada balão e sem usar a rede.</dd>
         </div>
         <div>
@@ -498,7 +533,7 @@
           <p>Ele está na <a href="https://github.com/Eduardo2049/MangaLens/releases/latest">página de releases</a> do GitHub. O Android vai pedir para permitir a instalação de fontes desconhecidas.</p>
         </li>
         <li>
-          <h3>Cole sua chave da OpenRouter</h3>
+          <h3>Cole sua chave da OpenRouter<sakuga-tooltip label="O que é a chave?" text="Uma senha que deixa o app usar a sua conta gratuita da OpenRouter. Ela fica só no seu celular."></sakuga-tooltip></h3>
           <p>Crie uma chave gratuita em <a href="https://openrouter.ai/settings/keys">openrouter.ai</a> e cole no app, em Configurações, no campo Chave da OpenRouter.</p>
         </li>
         <li>
@@ -511,20 +546,22 @@
         </li>
       </ol>
       <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/Eduardo2049/MangaLens/releases/latest">
+        <a class="btn btn-primary" data-sakuga="download" href="https://github.com/Eduardo2049/MangaLens/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>
           Baixar o APK
         </a>
-        <a class="btn btn-secondary" href="https://github.com/Eduardo2049/MangaLens#readme">Ler a documentação</a>
+        <a class="btn btn-secondary" data-sakuga="link" href="https://github.com/Eduardo2049/MangaLens#readme">Ler a documentação</a>
       </div>
       <p class="more">Quer compilar o app ou hospedar o backend opcional? O passo a passo está no README.</p>
     </div>
   </section>
 </main>
 
+<sakuga-toast id="toast" duration="2.2"></sakuga-toast>
+
 <footer class="footer">
   <div class="wrap">
-    <p>MangaLens é código aberto sob a licença MIT. Feito por <a href="https://github.com/Eduardo2049">Eduardo Felipe</a>.</p>
+    <p>MangaLens é código aberto sob a licença MIT. Feito por <a href="https://github.com/Eduardo2049">Eduardo Felipe</a>. Botões e efeitos: <a href="https://github.com/finktheartist/sakuga-vfx">sakuga-vfx</a> (MIT).</p>
     <nav aria-label="Links do projeto">
       <a href="https://github.com/Eduardo2049/MangaLens">Repositório</a>
       <a href="https://github.com/Eduardo2049/MangaLens/releases">Releases</a>
@@ -533,8 +570,52 @@
   </div>
 </footer>
 
+<!-- sakuga-vfx (vendor/sakuga, MIT): só os componentes usados aqui. -->
+<script src="vendor/sakuga/button.js"></script>
+<script src="vendor/sakuga/toast.js"></script>
+<script src="vendor/sakuga/tooltip.js"></script>
 <script>
 (() => {
+  const fx = window.SakugaFX;
+  if (!fx || !customElements.get("sakuga-button")) return; // sem os componentes, os links normais ficam
+
+  // Cores dos efeitos (nuvens, explosões, letras). Gere outras em lab/sakuga.html.
+  const SAKUGA_FX = { fill: "#FFFFFF", shade: "#BDEFF7", line: "#1B1740", accent: "#22D3EE", ink: "#1B1740", sfx: ["#1B1740", "#FFFFFF"] };
+  Object.assign(fx.P, SAKUGA_FX);
+
+  const toast = document.getElementById("toast");
+
+  // Troca cada link marcado por um sakuga-button com o mesmo conteúdo. O efeito toca no clique e a página
+  // abre logo depois; Ctrl/⌘/Shift abre numa aba nova na hora, como num link.
+  document.querySelectorAll("a.btn[data-sakuga]").forEach((link) => {
+    const button = document.createElement("sakuga-button");
+    const download = link.dataset.sakuga === "download";
+    // Classes próprias: as do link (.btn-primary...) dariam um fundo quadrado atrás do botão arredondado.
+    button.className = link.classList.contains("btn-primary") ? "sk-primary" : "sk-secondary";
+    if (!download) button.setAttribute("variant", "secondary");
+    button.dataset.href = link.href;
+    button.append(...link.childNodes);
+    link.replaceWith(button);
+
+    button.addEventListener("click", (event) => {
+      const href = button.dataset.href;
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        window.open(href, "_blank", "noopener");
+        return;
+      }
+      if (fx.calm) { location.href = href; return; } // "reduzir movimento": sem espera
+      if (download) {
+        setTimeout(() => button.done(0), 380);
+        setTimeout(() => toast.show("Abrindo o GitHub…"), 300);
+      }
+      setTimeout(() => { location.href = href; }, download ? 900 : 420);
+    });
+  });
+})();
+</script>
+<script>
+(() => {
+  const fx = window.SakugaFX; // efeitos da demonstração; sem ele a demonstração roda igual
   const STATUS = {
     WATCHING:    ["AUTO ●", "#34D399"],
     PAUSED:      ["AUTO ○", "#94A3B8"],
@@ -570,11 +651,18 @@
     if (cached) {
       cards.forEach((c) => c.classList.add("is-shown"));
       result.textContent = "4 balões vieram do cache. Nenhuma requisição.";
+      if (fx) { const p = fx.at(floater, 1, 0); fx.ticks(p.x - 6, p.y, { dir: -1.05, n: 3, r: 5, len: 14, fan: 0.36, life: 0.45 }); }
     } else {
       setStatus("TRANSLATING");
       await wait(700);
-      for (const c of cards) { c.classList.add("is-shown"); await wait(380); }
+      for (const c of cards) {
+        c.classList.add("is-shown");
+        // Cada balão pousa com um pouco de fumaça.
+        if (fx) { const b = fx.at(c, 0.5, 1); fx.puff(b.x, b.y, { size: 7, n: 3, vy: -10, life: 0.5 }); }
+        await wait(380);
+      }
       result.textContent = "4 balões novos, traduzidos em 1 requisição.";
+      if (fx) { const p = fx.at(page, 0.3, 0.2); fx.sfx("kachi", p.x, p.y, { size: 84, rot: -0.1, life: 0.8, ...fx.hollow() }); }
       cached = true;
     }
     setStatus("WATCHING");
@@ -584,6 +672,7 @@
 
   floater.addEventListener("click", () => {
     if (running) return;
+    if (fx) { const p = fx.at(floater, 1, 0); fx.ticks(p.x - 6, p.y - 2, { dir: -1.05, n: 3, r: 5, len: 16, fan: 0.36, life: 0.45 }); }
     if (paused) {
       paused = false;
       translate();
