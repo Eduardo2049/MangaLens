@@ -46,7 +46,9 @@ android {
     // Shared secret checked by the backend (MANGALENS_APP_TOKEN). Not a real secret once the APK is public,
     // but it keeps casual scrapers from spending the backend's OpenRouter quota.
     buildConfigField("String", "TRANSLATION_API_TOKEN", buildString(localSetting("TRANSLATION_API_TOKEN", "")))
-    buildConfigField("String", "OPENROUTER_API_KEY", buildString(localSetting("OPENROUTER_API_KEY", "")))
+    // The personal key from local.properties only goes into DEBUG builds (see buildTypes): a release APK is
+    // meant to be shared, and anything in BuildConfig can be read back out of the APK.
+    buildConfigField("String", "OPENROUTER_API_KEY", "\"\"")
     buildConfigField(
       "String", "OPENROUTER_TEXT_MODELS",
       buildString(localSetting("OPENROUTER_TEXT_MODELS", "dots-studio/dots-3-note-preview:free,nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-3-ultra-550b-a55b:free"))
@@ -79,7 +81,9 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
     }
-    debug { }
+    debug {
+      buildConfigField("String", "OPENROUTER_API_KEY", buildString(localSetting("OPENROUTER_API_KEY", "")))
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -93,6 +97,12 @@ android {
 
   // Reverted to standard APK name to ensure build stability on AGP 9.1.1
   // Use the default app-debug.apk location
+}
+
+ksp {
+  // Room writes the schema of each database version here. Commit app/schemas/*.json: it is the record
+  // future migrations are checked against.
+  arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 tasks.withType<Test>().configureEach {

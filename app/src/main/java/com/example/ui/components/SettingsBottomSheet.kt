@@ -136,14 +136,13 @@ fun SettingsContent(
                 savedKey = userPreferences.keyFor(selected),
                 onSave = { onSaveApiKey(selected, it) }
             )
-            if (selected.usesChosenModel) {
-                Spacer(Modifier.height(12.dp))
-                ModelField(
-                    provider = selected,
-                    savedModel = userPreferences.customModels[selected].orEmpty(),
-                    onSave = { onSaveModel(selected, it) }
-                )
-            }
+            // OpenRouter: optional list of free models, so a model taken offline does not need a new APK.
+            Spacer(Modifier.height(12.dp))
+            ModelField(
+                provider = selected,
+                savedModel = userPreferences.customModels[selected].orEmpty(),
+                onSave = { onSaveModel(selected, it) }
+            )
         }
 
         Column {
@@ -304,7 +303,7 @@ private fun ApiKeyField(
     }
 }
 
-/** Model name for providers that use a single model; empty = the provider's default. */
+/** Model for OpenAI/Gemini, or the list of free models for OpenRouter; empty = the default. */
 @Composable
 private fun ModelField(
     provider: TranslationProvider,
@@ -314,13 +313,16 @@ private fun ModelField(
 ) {
     var draft by remember(provider, savedModel) { mutableStateOf(savedModel) }
     val focusManager = LocalFocusManager.current
+    // OpenRouter takes a list of free models (tried in order); the other providers take a single model.
+    val isList = !provider.usesChosenModel
+    val defaultText = if (isList) OpenRouterClient.textModels.joinToString(", ") else provider.defaultModel
     Column(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it.trim() },
-            singleLine = true,
-            label = { Text("Modelo") },
-            placeholder = { Text(provider.defaultModel) },
+            singleLine = !isList,
+            label = { Text(if (isList) "Modelos gratuitos (até 3, separados por vírgula)" else "Modelo") },
+            placeholder = { Text(defaultText) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = {
                 if (draft != savedModel) onSave(draft)
@@ -332,7 +334,12 @@ private fun ModelField(
         )
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
             Text(
-                text = if (savedModel.isBlank()) "Vazio usa o padrão: ${provider.defaultModel}" else "Usando o modelo escolhido.",
+                text = when {
+                    savedModel.isBlank() && isList -> "Vazio usa a lista do app. Veja os modelos grátis em openrouter.ai/models."
+                    savedModel.isBlank() -> "Vazio usa o padrão: ${provider.defaultModel}"
+                    isList -> "Usando a sua lista de modelos."
+                    else -> "Usando o modelo escolhido."
+                },
                 color = LensColors.TextMuted,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,

@@ -112,6 +112,21 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
 
+      # ── Lint: report only for now (does not fail the build); see the HTML report in the artifacts ──
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: ./gradlew :app:lintDebug --stacktrace
+
+      - name: Upload lint report
+        if: always() && steps.lint.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.*
+          retention-days: 14
+          if-no-files-found: ignore
+
       # ── Release (tags only) ──────────────────────────────────────────────────
       # Optional signing secrets: KEYSTORE_BASE64 (base64 of the .jks), STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD.
       # Without them the release APK is signed with the CI debug key (installable, but updates between

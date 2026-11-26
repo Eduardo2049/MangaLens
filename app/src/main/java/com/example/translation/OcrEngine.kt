@@ -19,14 +19,33 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** On-device text recognition (ML Kit, bundled models — no network, no quota). */
+/**
+ * On-device text recognition (ML Kit, bundled models — no network, no quota).
+ *
+ * Recognizers are created on first use and [close] frees them; the next recognition creates them again.
+ * The engine lives in the shared [TranslationPipeline], so closing must not leave it unusable.
+ */
 class OcrEngine {
 
-    private val latin by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
-    private val japanese by lazy { TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build()) }
-    private val korean by lazy { TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build()) }
-    private val chinese by lazy { TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()) }
-    private val created = mutableSetOf<TextRecognizer>()
+    private enum class Script { LATIN, JAPANESE, KOREAN, CHINESE }
+
+    private val clients = mutableMapOf<Script, TextRecognizer>()
+
+    private fun client(script: Script): TextRecognizer = synchronized(clients) {
+        clients.getOrPut(script) {
+            when (script) {
+                Script.LATIN -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                Script.JAPANESE -> TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+                Script.KOREAN -> TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+                Script.CHINESE -> TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+            }
+        }
+    }
+
+    private val latin: TextRecognizer get() = client(Script.LATIN)
+    private val japanese: TextRecognizer get() = client(Script.JAPANESE)
+    private val korean: TextRecognizer get() = client(Script.KOREAN)
+    private val chinese: TextRecognizer get() = client(Script.CHINESE)
 
     suspend fun recognize(bitmap: Bitmap, source: SupportedLanguage): List<OcrBlock> {
         val image = InputImage.fromBitmap(bitmap, 0)
@@ -59,7 +78,6 @@ class OcrEngine {
     }
 
     private suspend fun recognizeWith(recognizer: TextRecognizer, image: InputImage): List<OcrBlock> {
-        synchronized(created) { created += recognizer }
         val result = try {
             recognizer.process(image).await()
         } catch (e: CancellationException) {
@@ -90,10 +108,11 @@ class OcrEngine {
         const val MIN_CHINESE_IDEOGRAPHS = 4
     }
 
+    /** Frees the ML Kit models; the engine stays usable (they are created again on the next page). */
     fun close() {
-        synchronized(created) {
-            created.forEach { runCatching { it.close() } }
-            created.clear()
+        synchronized(clients) {
+            clients.values.forEach { runCatching { it.close() } }
+            clients.clear()
         }
     }
 }

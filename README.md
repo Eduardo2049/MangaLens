@@ -64,7 +64,7 @@ A versão anterior reenviava a tela inteira como imagem a cada ~5 s, porque os p
 | 🆓 **OpenRouter grátis** | Usa apenas modelos `:free`, com fallback automático entre eles. |
 | ⏱️ **Espera inteligente** | Traduz quando a tela fica parada ~0,4 s em conteúdo novo. |
 | ⚡ **Balões progressivos** | A resposta da IA chega em streaming: cada balão aparece assim que é traduzido, sem esperar a página inteira. |
-| 🧠 **Cache** | Por balão (OCR mode) e por página (modo visão). |
+| 🧠 **Cache salvo** | Por balão, guardado no aparelho (Room): reler um capítulo ou reabrir a bolha não gasta requisição. A bolha e a tela do app usam o mesmo cache e a mesma cota. |
 | 🚦 **Limites respeitados** | Espaça requisições (20/min), conta o uso diário e respeita o `Retry-After` de um 429. |
 | 🪟 **Overlay que não atrapalha** | Uma única camada que ignora toques: o leitor continua rolando normalmente. |
 | 🔐 **Backend opcional** | Proxy que guarda a chave fora do APK e só aceita modelos gratuitos. |
@@ -75,7 +75,7 @@ A versão anterior reenviava a tela inteira como imagem a cada ~5 s, porque os p
 |---|---|
 | Arrastar | Move a bolha |
 | Tocar | Liga/pausa a tradução automática (no modo Manual: traduz a tela / esconde a tradução) |
-| Segurar ~0,5 s | Força uma nova tradução da tela atual |
+| Segurar ~0,5 s | Força uma nova tradução da tela atual: os textos dela saem do cache e vão de novo para a IA |
 | ✖ | Encerra o tradutor |
 
 Estados: `AUTO ●` (ativo), `AGUARDANDO...` (tela em movimento), `LENDO...` (OCR), `TRADUZINDO...` (API), `LIMITE ⏳` (limite da API — tenta de novo sozinho), `ERRO ●` (segure para tentar de novo). A notificação mostra quantas requisições foram usadas hoje.
@@ -98,6 +98,8 @@ Para OpenAI e Gemini dá para escrever o nome de outro modelo no campo **Modelo*
 
 **APK baixado de uma Release:** abra **Configurações → Chave da OpenRouter**, cole a chave criada em [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) e toque em **Salvar**. A chave fica só no aparelho (excluída do backup) e tem prioridade sobre qualquer outra configuração.
 
+**Modelos gratuitos:** a lista de modelos `:free` da OpenRouter muda com o tempo. Em **Configurações → Provedor de tradução → OpenRouter**, o campo **Modelos gratuitos** aceita até 3 nomes separados por vírgula, em ordem de preferência (veja os atuais em [openrouter.ai/models?max_price=0](https://openrouter.ai/models?max_price=0)). Vazio usa a lista que veio no app; não precisa gerar outro APK.
+
 **Build local (teste pessoal):**
 
 1. Crie uma conta e uma chave em [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
@@ -107,7 +109,7 @@ Para OpenAI e Gemini dá para escrever o nome de outro modelo no campo **Modelo*
 OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-3. Gere e instale o APK (abaixo). Com a chave definida o app chama a OpenRouter direto — não precisa de backend nem de PC ligado.
+3. Gere e instale o APK **debug** (abaixo). Com a chave definida o app chama a OpenRouter direto — não precisa de backend nem de PC ligado. A chave do `local.properties` só entra no build debug: o APK release (feito para ser compartilhado) nunca leva chave, porque tudo que está no `BuildConfig` pode ser lido de dentro do APK.
 
 Opcional no mesmo arquivo:
 
@@ -271,7 +273,9 @@ app/src/main/java/com/example/
   service/StaticLayoutMeasurer.kt     Mede o texto com o mesmo StaticLayout usado para desenhar
   translation/BubbleTextFitter.kt     Escolhe tamanho da fonte e do card para cada balão
   translation/BlockTranslator.kt      Cache, validação por id, nova tentativa, estatísticas da página
-  translation/                        OCR, cache, prompts, orçamento de requisições, pipeline
+  translation/TranslationPipeline.kt  Pipeline único do app (bolha + tela), cache salvo no Room
+  translation/                        OCR, cache, prompts, orçamento de requisições
+  data/local/                         Preferências, histórico e cache salvo (Room, com migrações)
   data/remote/OpenRouterClient.kt     Cliente OpenRouter (fallback de modelos, 429)
 back/src/server.js                    Proxy OpenRouter (opcional)
 ```
@@ -280,10 +284,11 @@ back/src/server.js                    Proxy OpenRouter (opcional)
 
 | Problema | Solução |
 |---|---|
-| `Configure a chave da OpenRouter` | Cole a chave em Configurações → Chave da OpenRouter (ou no `local.properties` e gere o APK de novo). |
-| `Resposta da IA sem traduções válidas` | Os modelos da lista responderam sem o JSON esperado; veja `modelos=` no log e troque `OPENROUTER_TEXT_MODELS`. |
+| `Configure a chave da OpenRouter` | Cole a chave em Configurações → Chave da OpenRouter (ou no `local.properties` e gere o APK debug de novo). |
+| `Resposta da IA sem traduções válidas` | Os modelos da lista responderam sem o JSON esperado; veja `modelos=` no log e troque os modelos em Configurações → OpenRouter → Modelos gratuitos. |
 | `LIMITE ⏳` | Limite por minuto/dia da OpenRouter. Aguarde; o app tenta sozinho. |
-| `ERRO ●` com "OpenRouter: ..." | Modelo indisponível: troque `OPENROUTER_TEXT_MODELS` por modelos free atuais. |
+| `ERRO ●` com "OpenRouter: ..." | Modelo indisponível: troque por modelos free atuais em Configurações → OpenRouter → Modelos gratuitos. |
+| Tradução errada que sempre volta | Ela vem do cache salvo: segure a bolha sobre a página para pedir a tradução de novo. |
 | Nada é traduzido | Confira se a captura é "Tela inteira" e se o idioma de origem está certo (ou "Detectar"). |
 | Texto lido errado (OCR) ou mangá vertical | Use o motor "OCR + IA vendo a imagem" nas Configurações. |
 | Tradução lenta | Veja no logcat `OCR: ... ms` e `API: ... ms` para saber qual etapa demora; modelos free variam de velocidade, ajuste `OPENROUTER_TEXT_MODELS`. |
