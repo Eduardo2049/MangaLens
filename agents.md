@@ -13,9 +13,9 @@ Este documento estabelece as regras, padrões e contexto técnico do projeto Man
 - **Linguagem:** Kotlin (Target JVM 17)
 - **UI:** Jetpack Compose (Material 3)
 - **Arquitetura:** MVVM + Clean Architecture
-- **Banco de Dados:** Room (histórico); preferências em `SharedPreferences`
+- **Banco de Dados:** Room (histórico + cache de traduções salvo); preferências em `SharedPreferences`
 - **Rede:** OkHttp + `org.json` (sem Retrofit/Moshi)
-- **IA:** OpenRouter (modelos `:free`) + OCR no aparelho (ML Kit Text Recognition)
+- **IA:** OpenRouter (modelos `:free`, padrão), OpenAI ou Gemini com a chave do usuário (`TranslationProvider`) + OCR no aparelho (ML Kit Text Recognition)
 - **Testes:** JUnit, Robolectric, Roborazzi (Screenshot Testing)
 
 ---
@@ -97,6 +97,10 @@ $env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 - Toda requisição passa pelo `RequestBudget` (20/min, limite diário) e pelo cache `TextTranslationCache`.
 - O dia do `RequestBudget` é o dia **UTC** (quando a OpenRouter zera a cota). O limite diário vem das Configurações (`dailyRequestLimit`: 50 grátis / 1000 com créditos).
 - O cache aproximado só aceita ruído de OCR (caractere perdido, `l`↔`1`, `o`↔`0`...); troca real de letra ("ele"/"ela") é outra frase e nunca reaproveita tradução.
+- Existe **um** `TranslationPipeline` por processo: use `TranslationPipeline.acquire(context)` e `release()` (a bolha no `onCreate`/`onDestroy`, a tela no ViewModel). Nunca crie `TranslationPipeline(...)` direto no app: duas instâncias teriam dois `RequestBudget` (espaçamento e bloqueio de 429 separados) e dois caches. Sem usuários, `release()` só libera o OCR; cache e cota continuam.
+- O espaçamento e o bloqueio pós-429 do `RequestBudget` são **por provedor**: um 429 da OpenRouter não segura OpenAI/Gemini.
+- O `TextTranslationCache` é preenchido pelo cache salvo (`TranslationStore` → `RoomTranslationStore`, tabela `cached_translation`) na primeira página de cada par de idiomas; o que a IA devolve é gravado em segundo plano, em ordem. Segurar a bolha (`translateNow(force = true)` → `fresh = true`) apaga do cache e do banco os textos daquela tela antes de pedir de novo — é o jeito do usuário corrigir uma tradução ruim.
+- A lista de modelos grátis da OpenRouter pode ser trocada em Configurações (`customModels[OPENROUTER]`, CSV, até 3); vazio usa `OPENROUTER_TEXT_MODELS` do build. O modo visão continua com `OPENROUTER_VISION_MODELS`.
 
 ---
 
@@ -111,9 +115,12 @@ $env:JAVA_HOME="$env:USERPROFILE\.jdk\jdk-17.0.12+7"
 
 - `.github/workflows/build.yml`: testes + APK em push/PR; tag `v*` gera GitHub Release (`versionName` = tag via `-PVERSION_NAME`).
 - Nenhuma chave em builds de CI: o usuário cola a chave da OpenRouter em Configurações (`manga_lens_secrets`, excluído do backup).
+- `OPENROUTER_API_KEY` do `local.properties` entra **só no build debug** (`buildTypes.debug`); o release sempre tem a chave vazia no `BuildConfig`.
+- Lint roda na CI só como relatório (`continue-on-error`); o HTML fica no artefato `lint-report`.
 - O projeto não tem backend em produção: o padrão é cada usuário colar a própria chave. Tudo que for de backend fica na pasta `back/` (proxy Node.js opcional).
 - `TRANSLATION_API_BASE_URL` não tem valor padrão: nunca volte a usar `10.0.2.2` como padrão (só existe no emulador). Backend público deve exigir `MANGALENS_APP_TOKEN` (app envia `X-MangaLens-Token` = `TRANSLATION_API_TOKEN`).
-- O histórico (Room, `AppDatabase.get`) recebe só traduções novas (`PageResult.fresh`) da bolha e da imagem de teste; fica limitado a `HISTORY_LIMIT` linhas.
+- O histórico (Room, `AppDatabase.get`) recebe só traduções novas (`PageResult.fresh`) da bolha e da imagem de teste; fica limitado a `HISTORY_LIMIT` linhas. O cache salvo fica limitado a `CACHE_LIMIT` linhas.
+- **Banco Room:** toda mudança de tabela sobe a `version` e ganha uma `Migration` em `AppDatabase.builder` (nunca `fallbackToDestructiveMigration`: apagaria histórico e cache). O esquema de cada versão é exportado em `app/schemas/` (`room.schemaLocation`) — commite esses JSON. `TranslationStoreTest` cobre a migração 1→2.
 - Firebase/Google Services foram removidos (não eram usados); não reintroduza sem `google-services.json` válido.
 
 ## 🧪 Diretrizes de Teste

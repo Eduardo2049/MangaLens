@@ -149,9 +149,9 @@ fun SettingsBottomSheet(
                             provider != TranslationProvider.OPENROUTER ->
                                 "Nenhuma chave configurada: cole sua chave da ${provider.title} abaixo para traduzir"
                             hasKey ->
-                                "OpenRouter (chave do app) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
+                                "OpenRouter (chave do app) • ${openRouterFirstModel(userPreferences)}"
                             OpenRouterClient.usesDirectKey() ->
-                                "OpenRouter (chave do build) • ${OpenRouterClient.textModels.firstOrNull().orEmpty()}"
+                                "OpenRouter (chave do build) • ${openRouterFirstModel(userPreferences)}"
                             OpenRouterClient.hasBackend() -> "OpenRouter via backend MangaLens"
                             else -> "Nenhuma chave configurada: cole sua chave da OpenRouter abaixo para traduzir"
                         },
@@ -179,13 +179,12 @@ fun SettingsBottomSheet(
                         savedKey = userPreferences.keyFor(selected),
                         onSave = { onSaveApiKey(selected, it) }
                     )
-                    if (selected.usesChosenModel) {
-                        ModelField(
-                            provider = selected,
-                            savedModel = userPreferences.customModels[selected].orEmpty(),
-                            onSave = { onSaveModel(selected, it) }
-                        )
-                    }
+                    // OpenRouter: optional list of free models, so a model taken offline does not need a new APK.
+                    ModelField(
+                        provider = selected,
+                        savedModel = userPreferences.customModels[selected].orEmpty(),
+                        onSave = { onSaveModel(selected, it) }
+                    )
                 }
 
                 if (userPreferences.provider.hasFreeTierLimit) item {
@@ -527,13 +526,21 @@ private fun ModelField(
     modifier: Modifier = Modifier
 ) {
     var draft by remember(provider, savedModel) { mutableStateOf(savedModel) }
+    // OpenRouter takes a list of free models (tried in order); the other providers take a single model.
+    val isList = !provider.usesChosenModel
+    val defaultText = if (isList) OpenRouterClient.textModels.joinToString(", ") else provider.defaultModel
     Column(modifier = modifier.fillMaxWidth().padding(top = 8.dp)) {
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it.trim() },
-            singleLine = true,
-            label = { Text("Modelo", color = Color(0xFF64748B)) },
-            placeholder = { Text(provider.defaultModel, color = Color(0xFF64748B)) },
+            singleLine = !isList,
+            label = {
+                Text(
+                    if (isList) "Modelos gratuitos (separados por vírgula, até 3)" else "Modelo",
+                    color = Color(0xFF64748B)
+                )
+            },
+            placeholder = { Text(defaultText, color = Color(0xFF64748B)) },
             textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -541,7 +548,12 @@ private fun ModelField(
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = if (savedModel.isBlank()) "Usando o padrão: ${provider.defaultModel}" else "Usando o modelo escolhido",
+                text = when {
+                    savedModel.isBlank() && isList -> "Usando a lista do app (veja os grátis em openrouter.ai/models)"
+                    savedModel.isBlank() -> "Usando o padrão: ${provider.defaultModel}"
+                    isList -> "Usando a sua lista"
+                    else -> "Usando o modelo escolhido"
+                },
                 color = Color(0xFF64748B),
                 fontSize = 11.sp,
                 modifier = Modifier.weight(1f)
@@ -555,6 +567,10 @@ private fun ModelField(
         }
     }
 }
+
+/** First OpenRouter model that will be tried: the user's list, or the one the app came with. */
+private fun openRouterFirstModel(prefs: UserPreferences): String =
+    OpenRouterClient.textModelsFor(prefs.customModels[TranslationProvider.OPENROUTER].orEmpty()).firstOrNull().orEmpty()
 
 @Composable
 private fun SettingsSectionTitle(title: String) {

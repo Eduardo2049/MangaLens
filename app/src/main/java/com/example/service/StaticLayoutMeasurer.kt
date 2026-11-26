@@ -1,5 +1,6 @@
 package com.example.service
 
+import android.annotation.SuppressLint
 import android.graphics.Typeface
 import android.os.Build
 import android.text.Layout
@@ -55,6 +56,9 @@ class StaticLayoutMeasurer(
         return before.isLetterOrDigit() && after.isLetterOrDigit()
     }
 
+    // Layout.BREAK_STRATEGY_BALANCED (API 23) has the same value as LineBreaker.BREAK_STRATEGY_BALANCED, which
+    // lint expects but only exists from API 29; minSdk is 24.
+    @SuppressLint("WrongConstant")
     private fun layout(text: String, paint: TextPaint, widthPx: Int): StaticLayout {
         val w = widthPx.coerceAtLeast(1)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

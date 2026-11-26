@@ -1,6 +1,6 @@
 # MangaLens — Arquitetura
 
-O MangaLens é um app Android (Kotlin, Jetpack Compose) que traduz mangás, manhwas e webtoons por cima de qualquer leitor. A tela é capturada com `MediaProjection`, o texto e a posição de cada balão vêm do OCR do aparelho (ML Kit) e só os textos novos vão para a OpenRouter (modelos `:free`). As traduções são desenhadas em janelas de sobreposição que deixam o toque passar para o leitor.
+O MangaLens é um app Android (Kotlin, Jetpack Compose) que traduz mangás, manhwas e webtoons por cima de qualquer leitor. A tela é capturada com `MediaProjection`, o texto e a posição de cada balão vêm do OCR do aparelho (ML Kit) e só os textos novos vão para o provedor escolhido: OpenRouter (modelos `:free`, padrão), OpenAI ou Gemini, com a chave do próprio usuário. As traduções são desenhadas em janelas de sobreposição que deixam o toque passar para o leitor, e ficam salvas no aparelho para não serem pedidas de novo.
 
 Leia também o `agents.md` (regras do projeto) antes de alterar o código.
 
@@ -25,11 +25,11 @@ flowchart TD
         TR[TextRegions<br/>junta linhas do mesmo balão]
         BT[BlockTranslator<br/>valida a resposta por id]
         TC[TextTranslationCache]
-        RB[RequestBudget<br/>20/min, limite diário em UTC]
+        RB[RequestBudget<br/>20/min, limite diário em UTC,<br/>429 por provedor]
     end
 
-    ORC[OpenRouterClient<br/>chave do usuário ou backend opcional]
-    DB[(Room: histórico)]
+    ORC[OpenRouterClient<br/>OpenRouter, OpenAI ou Gemini;<br/>chave do usuário ou backend opcional]
+    DB[(Room: histórico +<br/>cache salvo)]
 
     MA --> SCM
     SCM --> FT
@@ -41,10 +41,11 @@ flowchart TD
     ORC -. streaming .-> BT
     BT --> TOL
     TP -- "traduções novas" --> DB
+    DB -- "1ª página de cada par de idiomas" --> TC
     MRS --> DB
 ```
 
-Quando a tela está parada numa página já tratada, nada roda: nem OCR, nem rede. Balões já traduzidos vêm do cache, e cada página com texto novo custa uma requisição só de texto (ou com imagem, no motor "OCR + IA vendo a imagem").
+Quando a tela está parada numa página já tratada, nada roda: nem OCR, nem rede. Balões já traduzidos vêm do cache (que é recarregado do Room ao abrir o app ou a bolha), e cada página com texto novo custa uma requisição só de texto (ou com imagem, no motor "OCR + IA vendo a imagem"). A bolha e a tela do app usam o **mesmo** `TranslationPipeline` (`acquire`/`release`), então dividem o cache, a cota e o espaçamento entre requisições.
 
 ## 2. Pacotes
 
@@ -56,14 +57,17 @@ Quando a tela está parada numa página já tratada, nada roda: nem OCR, nem red
 | `service/` | `MangaOverlayService.kt` | Bolha flutuante, laço de detecção de mudança, status, notificação e histórico |
 | | `ScreenCaptureManager.kt` | `VirtualDisplay` + `ImageReader`; miniaturas baratas e bitmap só quando vai traduzir |
 | | `TranslationOverlayLayer.kt`, `StaticLayoutMeasurer.kt` | Desenha os cards com o mesmo `StaticLayout` que foi medido |
-| `translation/` | `TranslationPipeline.kt` | OCR → regiões → cache → API |
+| `translation/` | `TranslationPipeline.kt` | OCR → regiões → cache → API; uma instância por processo (`acquire`/`release`) |
+| | `TranslationStore.kt` | Interface do cache salvo (implementada com Room em `data/local/`) |
 | | `OcrEngine.kt`, `TextRegions.kt`, `Box.kt` | OCR (latim, japonês, coreano, chinês) e agrupamento dos balões |
 | | `BlockTranslator.kt`, `TranslationPrompts.kt` | Prompt, streaming, validação por id, nova tentativa |
 | | `TranslationCache.kt`, `RequestBudget.kt` | Cache tolerante a ruído de OCR e cota da OpenRouter |
 | | `BubbleTextFitter.kt`, `FrameThumbnail.kt`, `ScreenMath.kt` | Lógica pura (testada na JVM): tamanho da fonte, mudança de tela, limites de tela e imagem |
-| `data/remote/` | `OpenRouterClient.kt` | OkHttp + `org.json`; fallback de modelos, streaming SSE, 429 com `Retry-After` |
-| `data/local/` | `UserPreferencesRepository.kt` | Preferências em `SharedPreferences`; a chave fica em `manga_lens_secrets` (fora do backup) |
-| | `AppDatabase.kt`, `TranslationHistory.kt` | Histórico em Room (instância única, até 200 linhas) |
+| `data/remote/` | `OpenRouterClient.kt` | OkHttp + `org.json`; fallback de modelos, streaming SSE, 429 com `Retry-After`; também fala com OpenAI e Gemini |
+| `data/model/` | `TranslationProvider.kt`, `Models.kt` | Provedores (endpoint, modelo padrão, limite grátis), idiomas, modos |
+| `data/local/` | `UserPreferencesRepository.kt` | Preferências em `SharedPreferences`; as chaves ficam em `manga_lens_secrets` (fora do backup) |
+| | `AppDatabase.kt`, `TranslationHistory.kt` | Room (instância única, versão 2 com migração): histórico (até 200 linhas) e cache salvo (até 5000) |
+| | `RoomTranslationStore.kt` | Grava e carrega o cache salvo por par de idiomas |
 | `ui/` | `reader/`, `components/`, `theme/` | Tela principal, configurações, pré-visualização da imagem de teste |
 
 Fora do app:
@@ -90,7 +94,7 @@ O `local.properties` (fora do Git) precisa de `sdk.dir=C:/Users/<seu-usuario>/Ap
 ## 4. Testar no celular
 
 1. Instale o APK (permita "fontes desconhecidas").
-2. Em **Configurações → Chave da OpenRouter**, cole uma chave grátis de [openrouter.ai/keys](https://openrouter.ai/keys).
+2. Em **Configurações → Provedor de tradução**, escolha o provedor e cole a chave (a da OpenRouter é grátis em [openrouter.ai/keys](https://openrouter.ai/keys)).
 3. Toque em **Ativar tradução automática** e aceite notificação, sobreposição e captura da tela inteira.
 4. Abra o leitor (Mihon, Komikku, Kotatsu...) e leia normalmente; a bolha mostra o status.
 5. Logs: `adb logcat -s MangaLens` (a linha `Página: ocr= cacheHits= ...` resume cada página).

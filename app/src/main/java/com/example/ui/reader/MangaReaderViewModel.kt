@@ -49,7 +49,8 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
 
     private val historyDao = AppDatabase.get(application).translationHistoryDao()
     private val prefsRepo = UserPreferencesRepository(application)
-    private val pipeline = TranslationPipeline(application)
+    /** Shared with the floating translator (same cache, quota and request spacing); released in onCleared. */
+    private val pipeline = TranslationPipeline.acquire(application)
 
     private val _uiState = MutableStateFlow(MangaUiState())
     val uiState: StateFlow<MangaUiState> = _uiState.asStateFlow()
@@ -250,7 +251,7 @@ class MangaReaderViewModel(application: Application) : AndroidViewModel(applicat
     override fun onCleared() {
         super.onCleared()
         translationJob?.cancel()
-        pipeline.close()
+        TranslationPipeline.release()
     }
 
     private companion object {

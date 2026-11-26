@@ -87,7 +87,7 @@ class BlockTranslator(
         onPartial: (List<ScreenTranslation>) -> Unit = {}
     ): PageResult {
         if (blocks.isEmpty()) return PageResult(emptyList(), 0, usedCacheOnly = true, stats = PageStats())
-        val pair = "${source.code}>${target.code}"
+        val pair = languagePair(source, target)
         val uncached = blocks.filter { cache.get(pair, it.text) == null }
         var pending = uncached.distinctBy { TextTranslationCache.normalize(it.text) }
         var stats = PageStats(regions = blocks.size, cacheHits = blocks.size - uncached.size, requested = pending.size)
@@ -210,6 +210,9 @@ class BlockTranslator(
         const val MAX_INLINE_WAIT_MS = 8_000L
 
         private val CJK_TARGETS = setOf(SupportedLanguage.JAPANESE, SupportedLanguage.KOREAN, SupportedLanguage.CHINESE)
+
+        /** Cache key prefix for a language pair ("ja>pt"); also used by the saved cache. */
+        fun languagePair(source: SupportedLanguage, target: SupportedLanguage): String = "${source.code}>${target.code}"
 
         /** Soft character budget for the model; Latin sources always get at least their own length. */
         fun lengthBudget(block: OcrBlock): Int? {
